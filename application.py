@@ -25,14 +25,6 @@ YEARS = ["2021", "2022", "2023", "2024", "2025"]
 # ---------------------------------------------------------------------------
 multi = MultiCompanyAccounts()
 
-# Single year
-multi.save(
-    corp_codes=[SAMSUNG, SK_HYNIX],
-    bsns_year="2024",
-    fmt="csv",
-)
-# → data/multi_company_accounts/multi_acnt_00126380_00164779_2024_11011.csv
-
 # Multi-year (one combined file)
 multi.save_years(
     corp_codes=[SAMSUNG, SK_HYNIX],
@@ -46,14 +38,6 @@ multi.save_years(
 # 2. 단일회사 전체 재무제표 (Single Company Full Statements)
 # ---------------------------------------------------------------------------
 single = SingleCompanyStatements()
-
-# Single year — all statements
-single.save(corp_code=SAMSUNG, bsns_year="2024", fmt="json")
-# → data/single_company_statements/single_all_00126380_2024_11011_CFS.json
-
-# Single year — just income statement
-single.save_income_statement(corp_code=SAMSUNG, bsns_year="2024", fmt="csv")
-# → data/single_company_statements/IS_00126380_2024_11011_CFS.csv
 
 # Multi-year — all statements merged
 single.save_years(corp_code=SAMSUNG, bsns_years=YEARS, fmt="csv")

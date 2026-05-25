@@ -222,6 +222,13 @@ class OpenDartClient:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(items)
+            
+            # Apply CSV manipulation for financial statements
+            try:
+                from .data_processing import clean_financial_data
+                clean_financial_data(str(filepath), str(filepath))
+            except Exception as e:
+                logger.warning("Failed to process CSV with data_processing: %s", e)
 
         logger.info("Saved %d records → %s", len(items), filepath)
         return filepath
