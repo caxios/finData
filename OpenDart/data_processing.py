@@ -1,82 +1,91 @@
-import os
-import re
+"""Helpers for reshaping OpenDART financial-statement payloads."""
 
 import pandas as pd
 
+# OpenDART reprt_code → quarter number
+_REPRT_CODE_TO_QUARTER = {
+    "11013": 1,  # 1분기
+    "11012": 2,  # 반기
+    "11014": 3,  # 3분기
+    "11011": 4,  # 사업보고서 (annual)
+}
 
-_YEAR_RE = re.compile(r"(\d{4})")
+# Optional categorical column kept in the pivot index when present.
+# sj_div (BS/IS/CF/...) is deliberately excluded so all statement types
+# for one (corp, period) collapse into a single row.
+_OPTIONAL_INDEX_COLS = ["fs_div"]
 
 
-def clean_financial_data(input_csv_path: str, output_csv_path: str = None) -> pd.DataFrame:
-    """Pivot OpenDART financial-statement CSVs to one row per (corp, fs_div, fiscal_year).
+def consolidate_quarterly(items: list[dict]) -> pd.DataFrame:
+    """Pivot OpenDART account items into wide quarterly format.
 
-    - Melts the three term blocks (thstrm/frmtrm/bfefrmtrm) into long form.
-    - Derives a fiscal_year int from term_dt so BS ("YYYY.12.31 현재") and
-      IS ("YYYY.01.01 ~ YYYY.12.31") for the same year collapse onto one row.
-    - Pivots account_nm into columns, merging BS + IS accounts on the same row.
-    - Dedupes cross-report restatements (same period reported in multiple annual
-      reports) via aggfunc='first'.
+    Input: raw list-of-dicts from any endpoint that exposes
+    ``corp_code``, ``bsns_year``, ``reprt_code``, ``account_nm``, and
+    ``thstrm_amount`` (e.g. MultiCompanyAccounts, SingleCompanyStatements).
+
+    Output: one row per (corp_code, [fs_div], [sj_div], period), with each
+    unique account_nm promoted to its own column. Sorted so all rows for
+    one company appear together in chronological order.
     """
-    df = pd.read_csv(input_csv_path)
+    if not items:
+        return pd.DataFrame()
 
-    if "account_nm" not in df.columns or "thstrm_amount" not in df.columns:
-        if output_csv_path and input_csv_path != output_csv_path:
-            df.to_csv(output_csv_path, index=False, encoding="utf-8-sig")
-        return df
+    df = pd.DataFrame(items)
 
-    id_vars = [
-        "corp_code", "stock_code", "fs_div", "fs_nm", "account_nm",
-    ]
-    id_vars = [c for c in id_vars if c in df.columns]
+    df["quarter"] = df["reprt_code"].map(_REPRT_CODE_TO_QUARTER)
+    df["period"] = df["bsns_year"].astype(str) + "Q" + df["quarter"].astype(str)
 
-    term_mappings = [
-        ("thstrm_nm", "thstrm_dt", "thstrm_amount"),
-        ("frmtrm_nm", "frmtrm_dt", "frmtrm_amount"),
-        ("bfefrmtrm_nm", "bfefrmtrm_dt", "bfefrmtrm_amount"),
-    ]
-
-    term_dfs = []
-    for nm_col, dt_col, amt_col in term_mappings:
-        if nm_col in df.columns and dt_col in df.columns and amt_col in df.columns:
-            term_df = df[id_vars + [nm_col, dt_col, amt_col]].copy()
-            term_df.rename(
-                columns={nm_col: "term_nm", dt_col: "term_dt", amt_col: "amount"},
-                inplace=True,
-            )
-            term_dfs.append(term_df)
-
-    melted_df = pd.concat(term_dfs, ignore_index=True)
-
-    melted_df["amount"] = (
-        melted_df["amount"].astype(str).str.replace(",", "").str.strip()
+    df["amount"] = pd.to_numeric(
+        df["thstrm_amount"].astype(str).str.replace(",", "").str.strip(),
+        errors="coerce",
     )
-    melted_df["amount"] = pd.to_numeric(melted_df["amount"], errors="coerce")
 
-    melted_df["fiscal_year"] = (
-        melted_df["term_dt"].astype(str).str.extract(_YEAR_RE.pattern, expand=False)
-    )
-    melted_df["fiscal_year"] = pd.to_numeric(melted_df["fiscal_year"], errors="coerce")
+    extra = [c for c in _OPTIONAL_INDEX_COLS if c in df.columns]
+    index_cols = ["corp_code"] + extra + ["period"]
 
-    melted_df = melted_df.dropna(subset=["amount", "term_nm", "fiscal_year"])
-    melted_df["fiscal_year"] = melted_df["fiscal_year"].astype(int)
-
-    pivot_index = [c for c in ["corp_code", "stock_code", "fs_div", "fs_nm", "fiscal_year"] if c in melted_df.columns]
-
-    pivoted_df = melted_df.pivot_table(
-        index=pivot_index,
+    pivoted = df.pivot_table(
+        index=index_cols,
         columns="account_nm",
         values="amount",
         aggfunc="first",
     ).reset_index()
+    pivoted.columns.name = None
 
-    pivoted_df.columns.name = None
+    return pivoted.sort_values(index_cols).reset_index(drop=True)
 
-    sort_cols = [c for c in ["corp_code", "fs_div", "fiscal_year"] if c in pivoted_df.columns]
-    if sort_cols:
-        pivoted_df = pivoted_df.sort_values(by=sort_cols).reset_index(drop=True)
 
-    if output_csv_path:
-        os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
-        pivoted_df.to_csv(output_csv_path, index=False, encoding="utf-8-sig")
+def consolidate_indicators_quarterly(items: list[dict]) -> pd.DataFrame:
+    """Pivot OpenDART indicator items (fnlttCmpnyIndx) into wide quarterly format.
 
-    return pivoted_df
+    Input: raw list-of-dicts with ``corp_code``, ``bsns_year``, ``reprt_code``,
+    ``idx_nm``, and ``idx_val``.
+
+    Output: one row per (corp_code, period), with each ``idx_nm`` (e.g.
+    ``순이익률``, ``ROE``, ``부채비율``) promoted to its own column.
+    """
+    if not items:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(items)
+
+    df["quarter"] = df["reprt_code"].map(_REPRT_CODE_TO_QUARTER)
+    df["period"] = df["bsns_year"].astype(str) + "Q" + df["quarter"].astype(str)
+
+    df["value"] = pd.to_numeric(
+        df.get("idx_val", pd.Series(dtype=str)).astype(str).str.replace(",", "").str.strip(),
+        errors="coerce",
+    )
+
+    index_cols = ["corp_code", "period"]
+    if "stock_code" in df.columns:
+        index_cols.insert(1, "stock_code")
+
+    pivoted = df.pivot_table(
+        index=index_cols,
+        columns="idx_nm",
+        values="value",
+        aggfunc="first",
+    ).reset_index()
+    pivoted.columns.name = None
+
+    return pivoted.sort_values(index_cols).reset_index(drop=True)

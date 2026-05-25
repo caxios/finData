@@ -60,8 +60,15 @@ STATUS_MESSAGES = {
     "900": "정의되지 않은 오류가 발생하였습니다.",
 }
 
+# Indicator category codes (지표분류코드) for fnlttCmpnyIndx
+IDX_PROFITABILITY = "M210000"  # 수익성지표
+IDX_STABILITY = "M220000"      # 안정성지표
+IDX_GROWTH = "M230000"         # 성장성지표
+IDX_ACTIVITY = "M240000"       # 활동성지표
+
 _VALID_REPRT_CODES = {REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL}
 _VALID_FS_DIVS = {FS_DIV_SEPARATE, FS_DIV_CONSOLIDATED}
+_VALID_IDX_CL_CODES = {IDX_PROFITABILITY, IDX_STABILITY, IDX_GROWTH, IDX_ACTIVITY}
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +179,13 @@ class OpenDartClient:
                 f"Invalid fs_div '{fs_div}'. Must be one of: {_VALID_FS_DIVS}"
             )
 
+    @staticmethod
+    def validate_idx_cl_code(idx_cl_code: str) -> None:
+        if idx_cl_code not in _VALID_IDX_CL_CODES:
+            raise ValueError(
+                f"Invalid idx_cl_code '{idx_cl_code}'. Must be one of: {_VALID_IDX_CL_CODES}"
+            )
+
     # ------------------------------------------------------------------
     # File save helpers
     # ------------------------------------------------------------------
@@ -217,18 +231,17 @@ class OpenDartClient:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
         else:  # csv
-            fieldnames = list(items[0].keys())
+            fieldnames: list[str] = []
+            seen: set[str] = set()
+            for item in items:
+                for key in item.keys():
+                    if key not in seen:
+                        seen.add(key)
+                        fieldnames.append(key)
             with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(items)
-            
-            # Apply CSV manipulation for financial statements
-            try:
-                from .data_processing import clean_financial_data
-                clean_financial_data(str(filepath), str(filepath))
-            except Exception as e:
-                logger.warning("Failed to process CSV with data_processing: %s", e)
 
         logger.info("Saved %d records → %s", len(items), filepath)
         return filepath

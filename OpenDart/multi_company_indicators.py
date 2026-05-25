@@ -1,7 +1,8 @@
 """
-다중회사 주요계정 (Multi-Company Key Accounts)
+다중회사 주요 재무지표 (Multi-Company Key Financial Indicators)
 
-API endpoint: fnlttMultiAcnt.json
+API endpoint: fnlttCmpnyIndx.json
+Data is only provided from 2023 Q3 onward.
 """
 
 from pathlib import Path
@@ -15,10 +16,15 @@ from .client import (
     REPORT_CODE_HALF,
     REPORT_CODE_Q3,
     REPORT_CODE_ANNUAL,
+    IDX_PROFITABILITY,
+    IDX_STABILITY,
+    IDX_GROWTH,
+    IDX_ACTIVITY,
 )
-from .data_processing import consolidate_quarterly
+from .data_processing import consolidate_indicators_quarterly
 
 _QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
+_IDX_CODES = [IDX_PROFITABILITY, IDX_STABILITY, IDX_GROWTH, IDX_ACTIVITY]
 
 
 def _year_range_str(years: list[str]) -> str:
@@ -28,8 +34,8 @@ def _year_range_str(years: list[str]) -> str:
     return f"{s[0]}-{s[-1]}"
 
 
-class MultiCompanyAccounts:
-    """다중회사 주요계정 조회 (fnlttMultiAcnt)."""
+class MultiCompanyIndicators:
+    """다중회사 주요 재무지표 조회 (fnlttCmpnyIndx)."""
 
     def __init__(self, client: OpenDartClient | None = None):
         self._client = client or OpenDartClient()
@@ -38,19 +44,22 @@ class MultiCompanyAccounts:
         self,
         corp_codes: list[str],
         bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
+        reprt_code: str,
+        idx_cl_code: str,
     ) -> list[dict]:
-        """Fetch key accounts for multiple companies for one (year, report)."""
+        """Fetch one indicator category for multiple companies (one year, one report)."""
         if not corp_codes:
             raise ValueError("corp_codes must contain at least one corp_code.")
         self._client.validate_reprt_code(reprt_code)
+        self._client.validate_idx_cl_code(idx_cl_code)
 
         params = {
             "corp_code": ",".join(corp_codes),
             "bsns_year": bsns_year,
             "reprt_code": reprt_code,
+            "idx_cl_code": idx_cl_code,
         }
-        data = self._client.request("fnlttMultiAcnt.json", params)
+        data = self._client.request("fnlttCmpnyIndx.json", params)
         return data.get("list", [])
 
     def save_quarterly(
@@ -60,12 +69,12 @@ class MultiCompanyAccounts:
         filename: Optional[str] = None,
         data_dir: Path | str | None = None,
     ) -> Path:
-        """Fetch every quarter of every year for every company, pivot, and save.
+        """Fetch every quarter × every indicator category for every company, pivot, and save.
 
-        Produces a single CSV at ``data/multi_company_accounts/<filename>.csv``
-        with one row per (corp_code, fs_div, period) — account names become
-        columns. Rows are sorted by company, then chronologically by period,
-        so all of Company A's quarters appear before Company B's.
+        Produces a single CSV at ``data/multi_company_indicators/<filename>.csv``
+        with one row per (corp_code, period) — indicator names (``idx_nm``)
+        become columns, spanning all four 지표분류 categories (수익성/안정성/
+        성장성/활동성).
         """
         if not corp_codes:
             raise ValueError("corp_codes must contain at least one corp_code.")
@@ -74,25 +83,26 @@ class MultiCompanyAccounts:
 
         items: list[dict] = []
         for year in bsns_years:
-            for code in _QUARTERLY_CODES:
-                try:
-                    items.extend(self.get(corp_codes, year, code))
-                except OpenDartNoDataError:
-                    continue
+            for reprt in _QUARTERLY_CODES:
+                for idx in _IDX_CODES:
+                    try:
+                        items.extend(self.get(corp_codes, year, reprt, idx))
+                    except OpenDartNoDataError:
+                        continue
 
         if not items:
             raise ValueError("No data returned for the given companies/years.")
 
-        df = consolidate_quarterly(items)
+        df = consolidate_indicators_quarterly(items)
 
         if filename is None:
             codes_str = "_".join(corp_codes[:5])
             if len(corp_codes) > 5:
                 codes_str += f"_and{len(corp_codes) - 5}more"
-            filename = f"multi_acnt_quarterly_{codes_str}_{_year_range_str(bsns_years)}"
+            filename = f"multi_indx_quarterly_{codes_str}_{_year_range_str(bsns_years)}"
 
         root = Path(data_dir) if data_dir else DATA_DIR
-        out_dir = root / "multi_company_accounts"
+        out_dir = root / "multi_company_indicators"
         out_dir.mkdir(parents=True, exist_ok=True)
         filepath = out_dir / f"{filename}.csv"
         df.to_csv(filepath, index=False, encoding="utf-8-sig")

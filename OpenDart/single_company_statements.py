@@ -2,27 +2,27 @@
 단일회사 전체 재무제표 (Single Company Full Financial Statements)
 
 API endpoint: fnlttSinglAcntAll.json
-Docs section: ## 단일회사 전체 재무제표
 """
 
 from pathlib import Path
 from typing import Optional
 
 from .client import (
+    DATA_DIR,
     OpenDartClient,
     OpenDartNoDataError,
+    REPORT_CODE_Q1,
+    REPORT_CODE_HALF,
+    REPORT_CODE_Q3,
     REPORT_CODE_ANNUAL,
     FS_DIV_CONSOLIDATED,
-    SJ_DIV_BS,
-    SJ_DIV_IS,
-    SJ_DIV_CIS,
-    SJ_DIV_CF,
-    SJ_DIV_SCE,
 )
+from .data_processing import consolidate_quarterly
+
+_QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
 
 
 def _year_range_str(years: list[str]) -> str:
-    """Build a filename-safe label for a list of years."""
     if len(years) == 1:
         return years[0]
     s = sorted(years)
@@ -33,44 +33,13 @@ class SingleCompanyStatements:
     """단일회사 전체 재무제표 조회 (fnlttSinglAcntAll).
 
     Retrieves the **full financial statements** for a single company,
-    including Balance Sheet (BS), Income Statement (IS),
-    Comprehensive Income Statement (CIS), Cash Flow (CF),
-    and Statement of Changes in Equity (SCE).
-
-    Usage::
-
-        from OpenDart.single_company_statements import SingleCompanyStatements
-
-        api = SingleCompanyStatements()  # reads OPEN_DART_API from .env
-
-        # Just fetch data
-        items = api.get(
-            corp_code="00126380",
-            bsns_year="2024",
-            reprt_code="11011",
-            fs_div="CFS",
-        )
-
-        # Fetch AND save to data/ folder
-        filepath = api.save(
-            corp_code="00126380",
-            bsns_year="2024",
-            fmt="csv",
-        )
+    spanning Balance Sheet (BS), Income Statement (IS), Comprehensive
+    Income (CIS), Cash Flow (CF), and Statement of Changes in Equity (SCE).
     """
 
     def __init__(self, client: OpenDartClient | None = None):
-        """Initialize with an existing client or create a new one.
-
-        Args:
-            client: An ``OpenDartClient`` instance. If ``None``, a new
-                    client is created (reads API key from ``.env``).
-        """
         self._client = client or OpenDartClient()
 
-    # ------------------------------------------------------------------
-    # Core method
-    # ------------------------------------------------------------------
     def get(
         self,
         corp_code: str,
@@ -78,64 +47,7 @@ class SingleCompanyStatements:
         reprt_code: str = REPORT_CODE_ANNUAL,
         fs_div: str = FS_DIV_CONSOLIDATED,
     ) -> list[dict]:
-        """Fetch the full financial statements for a single company.
-
-        Args:
-            corp_code:  8-digit corp_code (고유번호).
-            bsns_year:  4-digit fiscal year, e.g. ``"2024"``.
-            reprt_code: Report type code. Defaults to annual (``"11011"``).
-                - ``"11013"`` – Q1 (1분기보고서)
-                - ``"11012"`` – Half-year (반기보고서)
-                - ``"11014"`` – Q3 (3분기보고서)
-                - ``"11011"`` – Annual (사업보고서)
-            fs_div: Financial statement division. Defaults to ``"CFS"``
-                    (consolidated).
-                - ``"OFS"`` – 재무제표 (개별/별도)
-                - ``"CFS"`` – 연결재무제표
-
-        Returns:
-            A list of dicts with keys:
-
-            =============================  ==========================================
-            Key                            Description
-            =============================  ==========================================
-            ``rcept_no``                   접수번호 (14자리)
-            ``reprt_code``                 보고서 코드
-            ``bsns_year``                  사업연도
-            ``corp_code``                  고유번호
-            ``sj_div``                     재무제표구분 (BS/IS/CIS/CF/SCE)
-            ``sj_nm``                      재무제표명
-            ``account_id``                 계정ID (IFRS/DART 표준코드)
-            ``account_nm``                 계정명
-            ``account_detail``             계정상세
-            ``thstrm_nm``                  당기명
-            ``thstrm_amount``              당기금액
-            ``thstrm_add_amount``          당기누적금액 (IS/CIS만 해당)
-            ``frmtrm_nm``                  전기명
-            ``frmtrm_amount``              전기금액
-            ``frmtrm_add_amount``          전기누적금액 (IS/CIS만 해당)
-            ``bfefrmtrm_nm``               전전기명 (사업보고서만)
-            ``bfefrmtrm_amount``           전전기금액 (사업보고서만)
-            ``ord``                        계정과목 정렬순서
-            ``currency``                   통화 단위
-            =============================  ==========================================
-
-        Raises:
-            ValueError: If inputs are invalid.
-            OpenDartNoDataError: If no data is found.
-            OpenDartError: For other API errors.
-
-        Example::
-
-            items = api.get(
-                corp_code="00126380",
-                bsns_year="2018",
-                reprt_code="11011",
-                fs_div="OFS",
-            )
-            for item in items:
-                print(item["sj_nm"], item["account_nm"], item["thstrm_amount"])
-        """
+        """Fetch full financial statements for one (year, report)."""
         self._client.validate_reprt_code(reprt_code)
         self._client.validate_fs_div(fs_div)
 
@@ -145,260 +57,53 @@ class SingleCompanyStatements:
             "reprt_code": reprt_code,
             "fs_div": fs_div,
         }
-
         data = self._client.request("fnlttSinglAcntAll.json", params)
         return data.get("list", [])
 
-    # ------------------------------------------------------------------
-    # Save – full statements
-    # ------------------------------------------------------------------
-    def save(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        filename: Optional[str] = None,
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """Fetch full financial statements and save to ``data/single_company_statements/``.
-
-        Args:
-            corp_code:  8-digit corp_code.
-            bsns_year:  4-digit fiscal year.
-            reprt_code: Report type code. Defaults to annual.
-            fs_div:     ``"CFS"`` (consolidated) or ``"OFS"`` (separate).
-            fmt:        ``"json"`` (default) or ``"csv"``.
-            filename:   Custom filename (without extension). Auto-generated
-                        if ``None``.
-            data_dir:   Override the output root directory.
-
-        Returns:
-            The ``Path`` of the saved file.
-
-        Example::
-
-            path = api.save(
-                corp_code="00126380",
-                bsns_year="2018",
-                fmt="csv",
-            )
-            print(f"Saved to {path}")
-        """
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-
-        if filename is None:
-            filename = f"single_all_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-
-        return self._client.save_data(
-            items,
-            filename=filename,
-            sub_dir="single_company_statements",
-            fmt=fmt,
-            data_dir=data_dir,
-        )
-
-    # ------------------------------------------------------------------
-    # Convenience filters (get only)
-    # ------------------------------------------------------------------
-    def get_balance_sheet(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """재무상태표만 조회 (Balance Sheet only)."""
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-        return [i for i in items if i.get("sj_div") == SJ_DIV_BS]
-
-    def get_income_statement(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """손익계산서만 조회 (Income Statement only)."""
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-        return [i for i in items if i.get("sj_div") == SJ_DIV_IS]
-
-    def get_comprehensive_income(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """포괄손익계산서만 조회 (Comprehensive Income Statement only)."""
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-        return [i for i in items if i.get("sj_div") == SJ_DIV_CIS]
-
-    def get_cash_flow(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """현금흐름표만 조회 (Cash Flow Statement only)."""
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-        return [i for i in items if i.get("sj_div") == SJ_DIV_CF]
-
-    def get_equity_changes(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """자본변동표만 조회 (Statement of Changes in Equity only)."""
-        items = self.get(corp_code, bsns_year, reprt_code, fs_div)
-        return [i for i in items if i.get("sj_div") == SJ_DIV_SCE]
-
-    # ------------------------------------------------------------------
-    # Convenience filters (save)
-    # ------------------------------------------------------------------
-    def save_balance_sheet(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """재무상태표 저장 (Balance Sheet → file)."""
-        items = self.get_balance_sheet(corp_code, bsns_year, reprt_code, fs_div)
-        filename = f"BS_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-        return self._client.save_data(
-            items, filename=filename,
-            sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
-        )
-
-    def save_income_statement(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """손익계산서 저장 (Income Statement → file)."""
-        items = self.get_income_statement(corp_code, bsns_year, reprt_code, fs_div)
-        filename = f"IS_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-        return self._client.save_data(
-            items, filename=filename,
-            sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
-        )
-
-    def save_comprehensive_income(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """포괄손익계산서 저장 (Comprehensive Income → file)."""
-        items = self.get_comprehensive_income(corp_code, bsns_year, reprt_code, fs_div)
-        filename = f"CIS_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-        return self._client.save_data(
-            items, filename=filename,
-            sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
-        )
-
-    def save_cash_flow(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """현금흐름표 저장 (Cash Flow → file)."""
-        items = self.get_cash_flow(corp_code, bsns_year, reprt_code, fs_div)
-        filename = f"CF_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-        return self._client.save_data(
-            items, filename=filename,
-            sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
-        )
-
-    def save_equity_changes(
-        self,
-        corp_code: str,
-        bsns_year: str,
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """자본변동표 저장 (Equity Changes → file)."""
-        items = self.get_equity_changes(corp_code, bsns_year, reprt_code, fs_div)
-        filename = f"SCE_{corp_code}_{bsns_year}_{reprt_code}_{fs_div}"
-        return self._client.save_data(
-            items, filename=filename,
-            sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
-        )
-
-    # ------------------------------------------------------------------
-    # Multi-year helpers
-    # ------------------------------------------------------------------
-    def get_years(
+    def save_quarterly(
         self,
         corp_code: str,
         bsns_years: list[str],
-        reprt_code: str = REPORT_CODE_ANNUAL,
         fs_div: str = FS_DIV_CONSOLIDATED,
-    ) -> list[dict]:
-        """Fetch full statements across multiple fiscal years and return a merged list.
+        filename: Optional[str] = None,
+        data_dir: Path | str | None = None,
+    ) -> Path:
+        """Fetch every quarter of every year, pivot, and save as one CSV.
 
-        Years that have no data are skipped silently. Each item already carries
-        a ``bsns_year`` field from the API.
+        Produces a single CSV at ``data/single_company_statements/<filename>.csv``
+        with one row per (corp_code, sj_div, period) — account names become
+        columns. Sorted by statement type then chronologically by period.
         """
         if not bsns_years:
             raise ValueError("bsns_years must contain at least one year.")
 
-        merged: list[dict] = []
+        items: list[dict] = []
         for year in bsns_years:
-            try:
-                merged.extend(self.get(corp_code, year, reprt_code, fs_div))
-            except OpenDartNoDataError:
-                continue
-        return merged
+            for code in _QUARTERLY_CODES:
+                try:
+                    items.extend(self.get(corp_code, year, code, fs_div))
+                except OpenDartNoDataError:
+                    continue
 
-    def save_years(
-        self,
-        corp_code: str,
-        bsns_years: list[str],
-        reprt_code: str = REPORT_CODE_ANNUAL,
-        fs_div: str = FS_DIV_CONSOLIDATED,
-        fmt: str = "json",
-        filename: Optional[str] = None,
-        data_dir: Path | str | None = None,
-    ) -> Path:
-        """Fetch multi-year full statements and save as one combined file.
+        if not items:
+            raise ValueError("No data returned for the given company/years.")
 
-        Filename defaults to
-        ``single_all_{corp_code}_{minYear}-{maxYear}_{reprt_code}_{fs_div}``.
-        """
-        items = self.get_years(corp_code, bsns_years, reprt_code, fs_div)
+        # API response omits corp_code in some payloads — inject it so the
+        # pivot index is always well-defined.
+        for it in items:
+            it.setdefault("corp_code", corp_code)
+
+        df = consolidate_quarterly(items)
 
         if filename is None:
             filename = (
-                f"single_all_{corp_code}_{_year_range_str(bsns_years)}"
-                f"_{reprt_code}_{fs_div}"
+                f"single_quarterly_{corp_code}_{_year_range_str(bsns_years)}_{fs_div}"
             )
 
-        return self._client.save_data(
-            items,
-            filename=filename,
-            sub_dir="single_company_statements",
-            fmt=fmt,
-            data_dir=data_dir,
-        )
+        root = Path(data_dir) if data_dir else DATA_DIR
+        out_dir = root / "single_company_statements"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filepath = out_dir / f"{filename}.csv"
+        df.to_csv(filepath, index=False, encoding="utf-8-sig")
+        return filepath
 

@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Optional
 
 from .client import (
+    DATA_DIR,
     OpenDartClient,
     OpenDartNoDataError,
     REPORT_CODE_ANNUAL,
 )
+from .report_processing import consolidate_report_main_info
 
 
 def _year_range_str(years: list[str]) -> str:
@@ -226,6 +228,60 @@ class ReportMainInfo:
             fmt=fmt,
             data_dir=data_dir,
         )
+
+    # ------------------------------------------------------------------
+    # Consolidated dump (all endpoints → one file)
+    # ------------------------------------------------------------------
+    def save_all(
+        self,
+        corp_code: str,
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+        filename: Optional[str] = None,
+        data_dir: Path | str | None = None,
+    ) -> Path:
+        """Fetch every endpoint across all years and stack into one CSV.
+
+        Each row carries an ``endpoint`` column labeling its origin. Endpoints
+        have heterogeneous schemas, so the output is the column-wise union;
+        cells that don't apply to a row's endpoint are left empty.
+
+        Sorted by endpoint, then bsns_year.
+        """
+        if not bsns_years:
+            raise ValueError("bsns_years must contain at least one year.")
+
+        rows: list[dict] = []
+        for endpoint_key in self.endpoints():
+            for year in bsns_years:
+                try:
+                    items = self.get(endpoint_key, corp_code, year, reprt_code)
+                except OpenDartNoDataError:
+                    continue
+                for it in items:
+                    # Force-override: the API sometimes returns Korean
+                    # term-number strings (e.g. "제55기(감사위원)") in this
+                    # field, which would corrupt sorting and filtering.
+                    it["bsns_year"] = int(year)
+                    it["endpoint"] = endpoint_key
+                rows.extend(items)
+
+        if not rows:
+            raise ValueError("No data returned across any endpoint.")
+
+        df = consolidate_report_main_info(rows)
+
+        if filename is None:
+            years_sorted = sorted(bsns_years)
+            year_label = years_sorted[0] if len(years_sorted) == 1 else f"{years_sorted[0]}-{years_sorted[-1]}"
+            filename = f"report_main_info_all_{corp_code}_{year_label}_{reprt_code}"
+
+        root = Path(data_dir) if data_dir else DATA_DIR
+        out_dir = root / "report_main_info"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filepath = out_dir / f"{filename}.csv"
+        df.to_csv(filepath, index=False, encoding="utf-8-sig")
+        return filepath
 
     # ------------------------------------------------------------------
     # Named wrappers (one per endpoint)

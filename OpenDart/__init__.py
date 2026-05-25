@@ -4,6 +4,7 @@ OpenDart — Python wrapper for OpenDART financial data APIs.
 Modules:
     client                    – Shared base client, errors, and constants
     multi_company_accounts    – 다중회사 주요계정 (fnlttMultiAcnt)
+    multi_company_indicators  – 다중회사 주요 재무지표 (fnlttCmpnyIndx)
     single_company_statements – 단일회사 전체 재무제표 (fnlttSinglAcntAll)
     report_main_info          – 정기보고서 주요정보 (30 endpoints)
 """
@@ -26,10 +27,15 @@ from .client import (
     SJ_DIV_CIS,
     SJ_DIV_CF,
     SJ_DIV_SCE,
+    IDX_PROFITABILITY,
+    IDX_STABILITY,
+    IDX_GROWTH,
+    IDX_ACTIVITY,
 )
 
 # Endpoint modules
 from .multi_company_accounts import MultiCompanyAccounts
+from .multi_company_indicators import MultiCompanyIndicators
 from .single_company_statements import SingleCompanyStatements
 from .report_main_info import ReportMainInfo
 
@@ -52,8 +58,13 @@ __all__ = [
     "SJ_DIV_CIS",
     "SJ_DIV_CF",
     "SJ_DIV_SCE",
+    "IDX_PROFITABILITY",
+    "IDX_STABILITY",
+    "IDX_GROWTH",
+    "IDX_ACTIVITY",
     # Endpoint classes
     "MultiCompanyAccounts",
+    "MultiCompanyIndicators",
     "SingleCompanyStatements",
     "ReportMainInfo",
 ]
