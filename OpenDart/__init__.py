@@ -5,6 +5,7 @@ Modules:
     client                    – Shared base client, errors, and constants
     multi_company_accounts    – 다중회사 주요계정 (fnlttMultiAcnt)
     single_company_statements – 단일회사 전체 재무제표 (fnlttSinglAcntAll)
+    report_main_info          – 정기보고서 주요정보 (30 endpoints)
 """
 
 # Base client & errors
@@ -30,6 +31,7 @@ from .client import (
 # Endpoint modules
 from .multi_company_accounts import MultiCompanyAccounts
 from .single_company_statements import SingleCompanyStatements
+from .report_main_info import ReportMainInfo
 
 __all__ = [
     # Client & errors
@@ -53,4 +55,5 @@ __all__ = [
     # Endpoint classes
     "MultiCompanyAccounts",
     "SingleCompanyStatements",
+    "ReportMainInfo",
 ]
