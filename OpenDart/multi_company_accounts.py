@@ -10,8 +10,17 @@ from typing import Optional
 
 from .client import (
     OpenDartClient,
+    OpenDartNoDataError,
     REPORT_CODE_ANNUAL,
 )
+
+
+def _year_range_str(years: list[str]) -> str:
+    """Build a filename-safe label for a list of years."""
+    if len(years) == 1:
+        return years[0]
+    s = sorted(years)
+    return f"{s[0]}-{s[-1]}"
 
 
 class MultiCompanyAccounts:
@@ -167,6 +176,62 @@ class MultiCompanyAccounts:
             if len(corp_codes) > 5:
                 codes_str += f"_and{len(corp_codes) - 5}more"
             filename = f"multi_acnt_{codes_str}_{bsns_year}_{reprt_code}"
+
+        return self._client.save_data(
+            items,
+            filename=filename,
+            sub_dir="multi_company_accounts",
+            fmt=fmt,
+            data_dir=data_dir,
+        )
+
+    # ------------------------------------------------------------------
+    # Multi-year helpers
+    # ------------------------------------------------------------------
+    def get_years(
+        self,
+        corp_codes: list[str],
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+    ) -> list[dict]:
+        """Fetch key accounts across multiple fiscal years and return a merged list.
+
+        Years that have no data are skipped silently (no exception). Each item
+        already contains a ``bsns_year`` field from the API, so callers can
+        group/filter after the call.
+        """
+        if not bsns_years:
+            raise ValueError("bsns_years must contain at least one year.")
+
+        merged: list[dict] = []
+        for year in bsns_years:
+            try:
+                merged.extend(self.get(corp_codes, year, reprt_code))
+            except OpenDartNoDataError:
+                continue
+        return merged
+
+    def save_years(
+        self,
+        corp_codes: list[str],
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+        fmt: str = "json",
+        filename: Optional[str] = None,
+        data_dir: Path | str | None = None,
+    ) -> Path:
+        """Fetch multi-year data and save as one combined file.
+
+        Filename defaults to
+        ``multi_acnt_{corp_codes}_{minYear}-{maxYear}_{reprt_code}``.
+        """
+        items = self.get_years(corp_codes, bsns_years, reprt_code)
+
+        if filename is None:
+            codes_str = "_".join(corp_codes[:5])
+            if len(corp_codes) > 5:
+                codes_str += f"_and{len(corp_codes) - 5}more"
+            filename = f"multi_acnt_{codes_str}_{_year_range_str(bsns_years)}_{reprt_code}"
 
         return self._client.save_data(
             items,

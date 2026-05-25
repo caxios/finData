@@ -14,8 +14,17 @@ from typing import Optional
 
 from .client import (
     OpenDartClient,
+    OpenDartNoDataError,
     REPORT_CODE_ANNUAL,
 )
+
+
+def _year_range_str(years: list[str]) -> str:
+    """Build a filename-safe label for a list of years."""
+    if len(years) == 1:
+        return years[0]
+    s = sorted(years)
+    return f"{s[0]}-{s[-1]}"
 
 # ---------------------------------------------------------------------------
 # Endpoint registry: snake_case English key → API filename
@@ -149,6 +158,66 @@ class ReportMainInfo:
 
         if filename is None:
             filename = f"{endpoint_key}_{corp_code}_{bsns_year}_{reprt_code}"
+
+        return self._client.save_data(
+            items,
+            filename=filename,
+            sub_dir="report_main_info",
+            fmt=fmt,
+            data_dir=data_dir,
+        )
+
+    # ------------------------------------------------------------------
+    # Multi-year (generic)
+    # ------------------------------------------------------------------
+    def get_years(
+        self,
+        endpoint_key: str,
+        corp_code: str,
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+    ) -> list[dict]:
+        """Fetch one endpoint across multiple fiscal years and return merged list.
+
+        Years with no data are skipped silently. ``bsns_year`` is injected
+        into each item if the response doesn't already include it, so years
+        remain distinguishable after merging.
+        """
+        if not bsns_years:
+            raise ValueError("bsns_years must contain at least one year.")
+
+        merged: list[dict] = []
+        for year in bsns_years:
+            try:
+                items = self.get(endpoint_key, corp_code, year, reprt_code)
+            except OpenDartNoDataError:
+                continue
+            for it in items:
+                it.setdefault("bsns_year", year)
+            merged.extend(items)
+        return merged
+
+    def save_years(
+        self,
+        endpoint_key: str,
+        corp_code: str,
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+        fmt: str = "json",
+        filename: Optional[str] = None,
+        data_dir: Path | str | None = None,
+    ) -> Path:
+        """Fetch multi-year data for one endpoint and save as one combined file.
+
+        Filename defaults to
+        ``{endpoint_key}_{corp_code}_{minYear}-{maxYear}_{reprt_code}``.
+        """
+        items = self.get_years(endpoint_key, corp_code, bsns_years, reprt_code)
+
+        if filename is None:
+            filename = (
+                f"{endpoint_key}_{corp_code}_{_year_range_str(bsns_years)}_{reprt_code}"
+            )
 
         return self._client.save_data(
             items,

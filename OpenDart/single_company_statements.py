@@ -10,6 +10,7 @@ from typing import Optional
 
 from .client import (
     OpenDartClient,
+    OpenDartNoDataError,
     REPORT_CODE_ANNUAL,
     FS_DIV_CONSOLIDATED,
     SJ_DIV_BS,
@@ -18,6 +19,14 @@ from .client import (
     SJ_DIV_CF,
     SJ_DIV_SCE,
 )
+
+
+def _year_range_str(years: list[str]) -> str:
+    """Build a filename-safe label for a list of years."""
+    if len(years) == 1:
+        return years[0]
+    s = sorted(years)
+    return f"{s[0]}-{s[-1]}"
 
 
 class SingleCompanyStatements:
@@ -334,5 +343,62 @@ class SingleCompanyStatements:
         return self._client.save_data(
             items, filename=filename,
             sub_dir="single_company_statements", fmt=fmt, data_dir=data_dir,
+        )
+
+    # ------------------------------------------------------------------
+    # Multi-year helpers
+    # ------------------------------------------------------------------
+    def get_years(
+        self,
+        corp_code: str,
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+        fs_div: str = FS_DIV_CONSOLIDATED,
+    ) -> list[dict]:
+        """Fetch full statements across multiple fiscal years and return a merged list.
+
+        Years that have no data are skipped silently. Each item already carries
+        a ``bsns_year`` field from the API.
+        """
+        if not bsns_years:
+            raise ValueError("bsns_years must contain at least one year.")
+
+        merged: list[dict] = []
+        for year in bsns_years:
+            try:
+                merged.extend(self.get(corp_code, year, reprt_code, fs_div))
+            except OpenDartNoDataError:
+                continue
+        return merged
+
+    def save_years(
+        self,
+        corp_code: str,
+        bsns_years: list[str],
+        reprt_code: str = REPORT_CODE_ANNUAL,
+        fs_div: str = FS_DIV_CONSOLIDATED,
+        fmt: str = "json",
+        filename: Optional[str] = None,
+        data_dir: Path | str | None = None,
+    ) -> Path:
+        """Fetch multi-year full statements and save as one combined file.
+
+        Filename defaults to
+        ``single_all_{corp_code}_{minYear}-{maxYear}_{reprt_code}_{fs_div}``.
+        """
+        items = self.get_years(corp_code, bsns_years, reprt_code, fs_div)
+
+        if filename is None:
+            filename = (
+                f"single_all_{corp_code}_{_year_range_str(bsns_years)}"
+                f"_{reprt_code}_{fs_div}"
+            )
+
+        return self._client.save_data(
+            items,
+            filename=filename,
+            sub_dir="single_company_statements",
+            fmt=fmt,
+            data_dir=data_dir,
         )
 
