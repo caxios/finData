@@ -1,4 +1,5 @@
 .env
 __pycache__/
 prompt_contexts/
+auto_corp_cache.json
 data/

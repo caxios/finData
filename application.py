@@ -7,7 +7,7 @@ Runs any combination of these four modules:
   - statements  -> SingleCompanyStatements (단일회사 전체 재무제표)
   - reports     -> ReportMainInfo          (정기보고서 주요정보)
 
-Companies are loaded from ``companies.json`` (name -> corp_code).
+Companies are loaded from ``get_companies.COMPANY_CODES`` (name -> corp_code).
 
 Examples:
     # All modules, all companies (default)
@@ -37,25 +37,45 @@ from OpenDart import (
     ReportMainInfo,
     OpenDartError,
 )
+from get_companies import COMPANY_CODES
 
-COMPANIES_FILE = Path(__file__).parent / "companies.json"
+FILE_NAMES=['semi_companies.json','car_companies.json','ship_companies.json']
+COMPANIES_FILE = Path(__file__).parent / FILE_NAMES[0]
 YEARS = ["2021", "2022", "2023", "2024", "2025"]
 
 ALL_MODULES = ("accounts", "indicators", "statements", "reports")
 
 
 def load_companies(name: str | None = None) -> dict[str, str]:
-    """Load companies from JSON. If ``name`` is given, return only that one."""
+    """Build a {name: corp_code} dict from the whitelist in companies.json.
+
+    ``companies.json`` is a JSON array of company names, e.g.
+    ``["삼성전자", "카카오"]``.  Each name is resolved against the full
+    DART corporate list cached in ``COMPANY_CODES``.
+
+    If ``name`` is given, ignore the whitelist and look up that single company.
+    """
+    if name is not None:
+        if name not in COMPANY_CODES:
+            raise KeyError(f"Company '{name}' not found in DART corporate list.")
+        return {name: COMPANY_CODES[name]}
+
+    # Read the whitelist
     with COMPANIES_FILE.open(encoding="utf-8") as f:
-        companies: dict[str, str] = json.load(f)
+        watchlist: list[str] = json.load(f)
 
-    if name is None:
-        return companies
+    # Resolve each name against the cached DART list
+    companies: dict[str, str] = {}
+    for company_name in watchlist:
+        if company_name in COMPANY_CODES:
+            companies[company_name] = COMPANY_CODES[company_name]
+        else:
+            print(f"[warn] '{company_name}' not found in DART corporate list - skipped.")
 
-    if name not in companies:
-        available = ", ".join(companies) or "(none)"
-        raise KeyError(f"Company '{name}' not found. Available: {available}")
-    return {name: companies[name]}
+    if not companies:
+        raise SystemExit("No valid companies in companies.json.")
+
+    return companies
 
 
 def run_accounts(corp_codes: list[str]) -> None:
