@@ -25,6 +25,7 @@ from .data_processing import consolidate_indicators_quarterly
 
 _QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
 _IDX_CODES = [IDX_PROFITABILITY, IDX_STABILITY, IDX_GROWTH, IDX_ACTIVITY]
+_CORP_CHUNK = 100  # OpenDART caps fnlttCmpnyIndx at 100 corp_codes per request.
 
 
 def _year_range_str(years: list[str]) -> str:
@@ -85,10 +86,12 @@ class MultiCompanyIndicators:
         for year in bsns_years:
             for reprt in _QUARTERLY_CODES:
                 for idx in _IDX_CODES:
-                    try:
-                        items.extend(self.get(corp_codes, year, reprt, idx))
-                    except OpenDartNoDataError:
-                        continue
+                    for i in range(0, len(corp_codes), _CORP_CHUNK):
+                        chunk = corp_codes[i : i + _CORP_CHUNK]
+                        try:
+                            items.extend(self.get(chunk, year, reprt, idx))
+                        except OpenDartNoDataError:
+                            continue
 
         if not items:
             raise ValueError("No data returned for the given companies/years.")

@@ -39,19 +39,19 @@ from OpenDart import (
 )
 from get_companies import COMPANY_CODES
 
-FILE_NAMES=['semi_companies.json','car_companies.json','ship_companies.json']
-COMPANIES_FILE = Path(__file__).parent / FILE_NAMES[0]
+WHITELIST_FILES = ['semi_companies.json', 'car_companies.json', 'ship_companies.json']
+DEFAULT_WHITELIST = 'car_companies.json'
 YEARS = ["2021", "2022", "2023", "2024", "2025"]
 
 ALL_MODULES = ("accounts", "indicators", "statements", "reports")
 
 
-def load_companies(name: str | None = None) -> dict[str, str]:
-    """Build a {name: corp_code} dict from the whitelist in companies.json.
+def load_companies(name: str | None = None, whitelist_file: Path | None = None) -> dict[str, str]:
+    """Build a {name: corp_code} dict from a whitelist JSON file.
 
-    ``companies.json`` is a JSON array of company names, e.g.
-    ``["삼성전자", "카카오"]``.  Each name is resolved against the full
-    DART corporate list cached in ``COMPANY_CODES``.
+    The whitelist is a JSON array of company names, e.g. ``["삼성전자", "카카오"]``.
+    Each name is resolved against the full DART corporate list cached in
+    ``COMPANY_CODES``.
 
     If ``name`` is given, ignore the whitelist and look up that single company.
     """
@@ -60,11 +60,12 @@ def load_companies(name: str | None = None) -> dict[str, str]:
             raise KeyError(f"Company '{name}' not found in DART corporate list.")
         return {name: COMPANY_CODES[name]}
 
-    # Read the whitelist
-    with COMPANIES_FILE.open(encoding="utf-8") as f:
+    if whitelist_file is None:
+        whitelist_file = Path(__file__).parent / DEFAULT_WHITELIST
+
+    with whitelist_file.open(encoding="utf-8") as f:
         watchlist: list[str] = json.load(f)
 
-    # Resolve each name against the cached DART list
     companies: dict[str, str] = {}
     for company_name in watchlist:
         if company_name in COMPANY_CODES:
@@ -73,22 +74,26 @@ def load_companies(name: str | None = None) -> dict[str, str]:
             print(f"[warn] '{company_name}' not found in DART corporate list - skipped.")
 
     if not companies:
-        raise SystemExit("No valid companies in companies.json.")
+        raise SystemExit(f"No valid companies in {whitelist_file.name}.")
 
     return companies
 
 
-def run_accounts(corp_codes: list[str]) -> None:
+def run_accounts(corp_codes: list[str], filename: str | None = None) -> None:
     try:
-        path = MultiCompanyAccounts().save_quarterly(corp_codes=corp_codes, bsns_years=YEARS)
+        path = MultiCompanyAccounts().save_quarterly(
+            corp_codes=corp_codes, bsns_years=YEARS, filename=filename
+        )
         print(f"[ok]   multi_company_accounts -> {path}")
     except (ValueError, OpenDartError) as e:
         print(f"[err]  multi_company_accounts: {e}")
 
 
-def run_indicators(corp_codes: list[str]) -> None:
+def run_indicators(corp_codes: list[str], filename: str | None = None) -> None:
     try:
-        path = MultiCompanyIndicators().save_quarterly(corp_codes=corp_codes, bsns_years=YEARS)
+        path = MultiCompanyIndicators().save_quarterly(
+            corp_codes=corp_codes, bsns_years=YEARS, filename=filename
+        )
         print(f"[ok]   multi_company_indicators -> {path}")
     except (ValueError, OpenDartError) as e:
         print(f"[err]  multi_company_indicators: {e}")
@@ -114,16 +119,23 @@ def run_reports(companies: dict[str, str]) -> None:
             print(f"[err]  report_main_info [{name}]: {e}")
 
 
-def main(target: str | None, modules: list[str]) -> None:
-    companies = load_companies(target)
+def main(target: str | None, modules: list[str], whitelist: str | None = None) -> None:
+    whitelist_path = Path(__file__).parent / whitelist if whitelist else None
+    companies = load_companies(target, whitelist_path)
     corp_codes = list(companies.values())
-    print(f"Fetching for: {', '.join(companies.keys())}")
+    # When a single company is requested, default filename logic in
+    # save_quarterly is fine. Otherwise tag the output by whitelist stem so
+    # batches from different industries don't clobber each other.
+    out_stem = None if target else (whitelist_path or Path(DEFAULT_WHITELIST)).stem
+
+    print(f"Fetching for: {len(companies)} companies from "
+          f"{'--company' if target else (whitelist or DEFAULT_WHITELIST)}")
     print(f"Modules:      {', '.join(modules)}")
 
     if "accounts" in modules:
-        run_accounts(corp_codes)
+        run_accounts(corp_codes, filename=f"multi_acnt_quarterly_{out_stem}" if out_stem else None)
     if "indicators" in modules:
-        run_indicators(corp_codes)
+        run_indicators(corp_codes, filename=f"multi_indx_quarterly_{out_stem}" if out_stem else None)
     if "statements" in modules:
         run_statements(companies)
     if "reports" in modules:
@@ -152,9 +164,14 @@ if __name__ == "__main__":
         "--only", "-o",
         help=f"Comma-separated modules to run. Choices: {','.join(ALL_MODULES)}. Default: all.",
     )
+    parser.add_argument(
+        "--whitelist", "-w",
+        choices=WHITELIST_FILES,
+        help=f"Whitelist JSON file to read. Default: {DEFAULT_WHITELIST}.",
+    )
     args = parser.parse_args()
 
-    main(target=args.company, modules=parse_modules(args.only))
+    main(target=args.company, modules=parse_modules(args.only), whitelist=args.whitelist)
 
 
 """

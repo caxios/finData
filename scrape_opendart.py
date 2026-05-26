@@ -6,6 +6,7 @@ import os
 
 output_path = os.path.join(os.path.dirname(__file__), 'docs', 'opendarts', 'main_info.txt')
 
+# 오픈다트 각 API들의 가이드 가져오기
 # First, read lines 1 to 41 and overwrite the file with just those lines
 with open(output_path, 'r', encoding='utf-8') as f:
     lines = f.readlines()

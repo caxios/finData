@@ -1,0 +1,30 @@
+# ── Data Manipulation & Analysis ──
+pandas
+numpy
+scipy
+
+# ── Machine Learning ──
+scikit-learn
+xgboost
+lightgbm
+catboost
+
+# ── Deep Learning ──
+torch
+torchvision
+tensorflow
+keras
+
+# ── Visualization ──
+matplotlib
+seaborn
+plotly
+
+# ── NLP ──
+nltk
+transformers
+
+# ── Utilities ──
+joblib
+tqdm
+openpyxl

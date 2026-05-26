@@ -19,6 +19,7 @@ from .client import (
 from .data_processing import consolidate_quarterly
 
 _QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
+_CORP_CHUNK = 100  # OpenDART caps fnlttMultiAcnt at 100 corp_codes per request.
 
 
 def _year_range_str(years: list[str]) -> str:
@@ -75,10 +76,12 @@ class MultiCompanyAccounts:
         items: list[dict] = []
         for year in bsns_years:
             for code in _QUARTERLY_CODES:
-                try:
-                    items.extend(self.get(corp_codes, year, code))
-                except OpenDartNoDataError:
-                    continue
+                for i in range(0, len(corp_codes), _CORP_CHUNK):
+                    chunk = corp_codes[i : i + _CORP_CHUNK]
+                    try:
+                        items.extend(self.get(chunk, year, code))
+                    except OpenDartNoDataError:
+                        continue
 
         if not items:
             raise ValueError("No data returned for the given companies/years.")
