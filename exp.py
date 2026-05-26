@@ -1,54 +1,71 @@
-"""
-# 처음 변수 선택 단계에서 라쏘나 랜덤포레스트 둘 다 해보는 것도 좋음.
-일단은 라쏘로 진행
+# ---------------------------------------------------------------
+# 1. 분위수 생성
+# ---------------------------------------------------------------
+def make_size_group(df, n_bins=10):
+    df = df.copy()
 
-"""
+    def _qcut(x):
+        valid = x.dropna()
+        if valid.nunique() < 2:
+            return pd.Series(np.nan, index=x.index)
+        bins = min(n_bins, valid.nunique())
+        try:
+            return pd.qcut(x, q=bins, labels=False, duplicates='drop')
+        except ValueError:
+            return pd.Series(np.nan, index=x.index)
 
-import pandas as pd
-import numpy as np
-from sklearn.linear_model import Lasso
-from sklearn.preprocessing import StandardScaler
+    df['size_group'] = df.groupby('period')['자산총계'].transform(_qcut)
+    df['size_group'] = df['size_group'].fillna(-1).astype(int)
+    return df
 
-# 1. 데이터 불러오기
-df = pd.read_csv('car_companies2_indicators.csv')
 
-# 2. 타겟 변수 설정 (예측하고자 하는 Y값 지정)
-# 모델이 예측할 목적 변수를 지정합니다. (예: 'ROE', '순이익률' 등)
-target_col = 'ROE' 
+# ---------------------------------------------------------------
+# 2. 계층적 중앙값 대체
+# ---------------------------------------------------------------
+def fill_median_hierarchical(df, cols, train_mask=None):
+    df = df.copy()
+    stat_src = df if train_mask is None else df.loc[train_mask]
 
-# X(독립변수)와 y(종속변수) 분리
-# 분석에 불필요한 회사코드, 기간 등의 식별자와 종속변수를 독립변수에서 제외합니다.
-X = df.drop(columns=['corp_code', 'stock_code', 'period', target_col])
-y = df[target_col]
+    for col in cols:
+        if col not in df.columns:
+            continue
 
-# 3. 결측치(NaN) 처리
-# 3-1. 결측치가 전체 데이터의 50% 이상인 열(변수)은 모델에 악영향을 주므로 제거합니다.
-threshold = len(df) * 0.5
-X = X.dropna(axis=1, thresh=threshold)
+        # (a) 동일 분기 + 동일 분위수 그룹의 중앙값
+        #     size_group == -1 (분위 생성 실패) 행은 (a) 단계에서 매칭되지 않음 → 다음 fallback으로 진행
+        med_grp = (
+            stat_src[stat_src['size_group'] != -1]
+            .groupby(['period', 'size_group'])[col]
+            .median()
+            .rename('_fill_grp')
+            .reset_index()
+        )
+        merged = df[['period', 'size_group']].merge(
+            med_grp, on=['period', 'size_group'], how='left'
+        )
+        df[col] = df[col].fillna(
+            pd.Series(merged['_fill_grp'].values, index=df.index)
+        )
 
-# 3-2. 우리가 예측해야 할 정답(y) 자체가 비어있는 행(Row)은 학습할 수 없으므로 삭제합니다.
-valid_idx = y.dropna().index
-X = X.loc[valid_idx]
-y = y.loc[valid_idx]
+        # (b) fallback: 동일 분기 전체 중앙값
+        med_period = stat_src.groupby('period')[col].median()
+        df[col] = df[col].fillna(df['period'].map(med_period))
 
-# 3-3. 남은 X 데이터의 결측치는 각 변수의 '중앙값'으로 대체하여 채워줍니다.
-X = X.fillna(X.median())
+        # (c) final fallback: 컬럼 전체 중앙값
+        overall = stat_src[col].median()
+        if pd.notna(overall):
+            df[col] = df[col].fillna(overall)
 
-# 4. 데이터 스케일링 (필수)
-# 라쏘는 단위 크기에 민감하므로, 평균을 0, 분산을 1로 맞추는 표준화를 진행합니다.
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+    return df
 
-# 5. 라쏘(Lasso) 모델 적합
-# alpha 값이 클수록 더 강력한 규제가 걸려 더 많은 변수의 계수가 0이 됩니다.
-lasso = Lasso(alpha=0.1, random_state=42)
-lasso.fit(X_scaled, y)
 
-# 6. 선택된 변수 추출
-# 모델 학습 결과, 회귀 계수(coef_)가 0이 살아남은 유의미한 변수들을 골라냅니다.
-selected_features = X.columns[lasso.coef_ != 0]
+# ---------------------------------------------------------------
+# 실행
+# ---------------------------------------------------------------
+filled = []
+for name, df in target_datasets:
+    df = make_size_group(df, n_bins=10)
+    df = fill_median_hierarchical(df, target_columns, train_mask=None)
 
-print(f"전처리 후 전체 변수 개수: {len(X.columns)}개")
-print(f"라쏘가 선택한 핵심 변수 개수: {len(selected_features)}개")
-print("\n[선택된 변수 목록]")
-print(selected_features.tolist())
+    remain = df[target_columns].isnull().sum().sum()
+    print(f"{name} 대체 완료. 남은 결측: {remain}")
+    filled.append((name, df))

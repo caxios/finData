@@ -33,10 +33,7 @@ result
 status	에러 및 정보 코드	(※메시지 설명 참조)
 message	에러 및 정보 메시지	(※메시지 설명 참조)
 list		
-rcept_no	접수번호	접수번호(14자리)
-
-※ 공시뷰어 연결에 이용예시
-- PC용 : https://dart.fss.or.kr/dsaf001/main.do?rcpNo=접수번호
+rcept_no	접수번호	접수번호(14자리) ※ 공시뷰어 연결에 이용예시 - PC용 : https://dart.fss.or.kr/dsaf001/main.do?rcpNo=접수번호
 bsns_year	사업 연도	사업연도(4자리)
 stock_code	종목 코드	상장회사의 종목코드(6자리)
 reprt_code	보고서 코드	1분기보고서 : 11013 반기보고서 : 11012 3분기보고서 : 11014 사업보고서 : 11011

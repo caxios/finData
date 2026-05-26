@@ -13,7 +13,7 @@ _REPRT_CODE_TO_QUARTER = {
 # Optional categorical column kept in the pivot index when present.
 # sj_div (BS/IS/CF/...) is deliberately excluded so all statement types
 # for one (corp, period) collapse into a single row.
-_OPTIONAL_INDEX_COLS = ["fs_div"]
+_OPTIONAL_INDEX_COLS = ["fs_div"] # 재무비율 계산 시 CFS의 데이터를 이용한다.
 
 
 def consolidate_quarterly(items: list[dict]) -> pd.DataFrame:
@@ -31,6 +31,11 @@ def consolidate_quarterly(items: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(items)
+
+    if "fs_div" in df.columns:
+        df = df[df["fs_div"] == "CFS"]
+        if df.empty:
+            return pd.DataFrame()
 
     df["quarter"] = df["reprt_code"].map(_REPRT_CODE_TO_QUARTER)
     df["period"] = df["bsns_year"].astype(str) + "Q" + df["quarter"].astype(str)
