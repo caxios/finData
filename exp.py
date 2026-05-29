@@ -1,71 +1,102 @@
-# ---------------------------------------------------------------
-# 1. 분위수 생성
-# ---------------------------------------------------------------
-def make_size_group(df, n_bins=10):
-    df = df.copy()
-
-    def _qcut(x):
-        valid = x.dropna()
-        if valid.nunique() < 2:
-            return pd.Series(np.nan, index=x.index)
-        bins = min(n_bins, valid.nunique())
-        try:
-            return pd.qcut(x, q=bins, labels=False, duplicates='drop')
-        except ValueError:
-            return pd.Series(np.nan, index=x.index)
-
-    df['size_group'] = df.groupby('period')['자산총계'].transform(_qcut)
-    df['size_group'] = df['size_group'].fillna(-1).astype(int)
-    return df
+def decile_portfolio_stats(df):
+    port = (
+        df.groupby(['period', 'Decile'])['Return']
+        .mean()
+        .unstack('Decile')
+        .sort_index()
+    )
+    summary = pd.DataFrame({
+        'cum_return': (1 + port).prod() - 1,
+        'mean_return': port.mean(),
+        'volatility': port.std(),
+        'sharpe_ann': port.mean() / port.std() * np.sqrt(4),
+        'n_periods': port.count(),
+    })
+    summary.index.name = 'Decile'
+    return summary, port
 
 
-# ---------------------------------------------------------------
-# 2. 계층적 중앙값 대체
-# ---------------------------------------------------------------
-def fill_median_hierarchical(df, cols, train_mask=None):
-    df = df.copy()
-    stat_src = df if train_mask is None else df.loc[train_mask]
+def decile_membership(df):
+    return {
+        period: {int(decile): sub['corp_code'].tolist()
+                 for decile, sub in g.groupby('Decile')}
+        for period, g in df.groupby('period')
+    }
 
-    for col in cols:
-        if col not in df.columns:
+
+def plot_decile_cumulative(port_ts, title):
+    import matplotlib.pyplot as plt
+    cum = (1 + port_ts).cumprod()
+    ax = cum.plot(figsize=(10, 6), colormap='RdYlGn_r')
+    ax.set_title(f"{title} — Decile Cumulative Return (quaterly rebalanced)")
+    ax.set_xlabel('period')
+    ax.set_ylabel('Cumulative Growth Multiple (Start = 1)')
+    ax.axhline(1.0, color='gray', linewidth=0.8, linestyle='--')
+    ax.legend(title='Decile', bbox_to_anchor=(1.02, 1), loc='upper left')
+    plt.tight_layout()
+    plt.show()
+    return ax
+
+
+def decile_transition_returns(df):
+    d = df.sort_values(['corp_code', 'period']).copy()
+    d['prev_Decile'] = d.groupby('corp_code')['Decile'].shift(1)
+    d['next_Return'] = d.groupby('corp_code')['Return'].shift(-1)
+    d = d.dropna(subset=['prev_Decile', 'next_Return'])
+    d['decile_change'] = (d['Decile'] - d['prev_Decile']).astype(int)
+
+    by_change = d.groupby('decile_change')['next_Return'].agg(['mean', 'median', 'std', 'count'])
+    matrix = d.pivot_table(
+        index='prev_Decile', columns='Decile', values='next_Return', aggfunc='mean'
+    )
+    return by_change, matrix
+
+
+results = {}
+sectors = ['car', 'semi', 'ship']
+methods = ['rf_mlp', 'lasso_mlp', 'xgboost']
+for sector in sectors:
+    for method in methods:
+        dict_key = f"{sector}_{method}"
+        
+        # 딕셔너리에 해당 키가 없으면 건너뜀
+        if dict_key not in final_ff_dfs:
+            print(f"⚠️ {dict_key} 데이터가 없어 건너뜁니다.")
             continue
-
-        # (a) 동일 분기 + 동일 분위수 그룹의 중앙값
-        #     size_group == -1 (분위 생성 실패) 행은 (a) 단계에서 매칭되지 않음 → 다음 fallback으로 진행
-        med_grp = (
-            stat_src[stat_src['size_group'] != -1]
-            .groupby(['period', 'size_group'])[col]
-            .median()
-            .rename('_fill_grp')
-            .reset_index()
+            
+        model_df = final_ff_dfs[dict_key].copy()
+        
+        # 1. 결측치 제거
+        cols = ['period', 'Return', 'Mkt_RF', 'SMB', 'HML', 'Earning_Factor']
+        model_df = model_df.dropna(subset=cols)
+        
+        # ==========================================
+        # 2. 분기별 어닝 팩터 기준 10분위수(Decile) 할당
+        # ==========================================
+        # rank(method='first')를 사용하여 확률값이 겹쳐도 강제로 10등분하도록 처리
+        # 1분위(D1): 가장 낮음(저위험) ~ 10분위(D10): 가장 높음(고위험)
+        model_df['Decile'] = model_df.groupby('period')['Earning_Factor'].transform(
+            lambda x: pd.qcut(x.rank(method='first'), q=10, labels=False) + 1
         )
-        merged = df[['period', 'size_group']].merge(
-            med_grp, on=['period', 'size_group'], how='left'
-        )
-        df[col] = df[col].fillna(
-            pd.Series(merged['_fill_grp'].values, index=df.index)
-        )
 
-        # (b) fallback: 동일 분기 전체 중앙값
-        med_period = stat_src.groupby('period')[col].median()
-        df[col] = df[col].fillna(df['period'].map(med_period))
+        # ==========================================
+        # 3. Decile 포트폴리오 수익률 / 변동성
+        # ==========================================
+        stats, port_ts = decile_portfolio_stats(model_df)
+        by_change, trans_matrix = decile_transition_returns(model_df)
+        members = decile_membership(model_df)
 
-        # (c) final fallback: 컬럼 전체 중앙값
-        overall = stat_src[col].median()
-        if pd.notna(overall):
-            df[col] = df[col].fillna(overall)
+        results[dict_key] = {
+            'stats': stats,
+            'port_ts': port_ts,
+            'by_change': by_change,
+            'matrix': trans_matrix,
+            'members': members,
+        }
 
-    return df
+        print(f"\n=== {dict_key} Decile Portfolio ===")
+        print(stats.round(4))
+        print(f"\n--- {dict_key} Decile per transition Average Return ---")
+        print(by_change.round(4))
 
-
-# ---------------------------------------------------------------
-# 실행
-# ---------------------------------------------------------------
-filled = []
-for name, df in target_datasets:
-    df = make_size_group(df, n_bins=10)
-    df = fill_median_hierarchical(df, target_columns, train_mask=None)
-
-    remain = df[target_columns].isnull().sum().sum()
-    print(f"{name} 대체 완료. 남은 결측: {remain}")
-    filled.append((name, df))
+        plot_decile_cumulative(port_ts, dict_key)

@@ -34,10 +34,10 @@ from .client import (
 )
 
 # Endpoint modules
-from .multi_company_accounts import MultiCompanyAccounts
-from .multi_company_indicators import MultiCompanyIndicators
-from .single_company_statements import SingleCompanyStatements
-from .report_main_info import ReportMainInfo
+from .api_types.multi_company_accounts import MultiCompanyAccounts
+from .api_types.multi_company_indicators import MultiCompanyIndicators
+from .api_types.single_company_statements import SingleCompanyStatements
+from .api_types.report_main_info import ReportMainInfo
 
 __all__ = [
     # Client & errors

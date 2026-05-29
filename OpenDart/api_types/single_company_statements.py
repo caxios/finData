@@ -7,7 +7,7 @@ API endpoint: fnlttSinglAcntAll.json
 from pathlib import Path
 from typing import Optional
 
-from .client import (
+from ..client import (
     DATA_DIR,
     OpenDartClient,
     OpenDartNoDataError,
@@ -17,7 +17,7 @@ from .client import (
     REPORT_CODE_ANNUAL,
     FS_DIV_CONSOLIDATED,
 )
-from .data_processing import consolidate_quarterly
+from ..utils.data_processing import consolidate_quarterly
 
 _QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
 

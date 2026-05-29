@@ -41,7 +41,10 @@ from get_companies import COMPANY_CODES
 
 WHITELIST_FILES = ['semi_companies.json', 'car_companies.json', 'ship_companies.json']
 DEFAULT_WHITELIST = 'car_companies.json'
-YEARS = ["2021", "2022", "2023", "2024", "2025"]
+START = 2015
+END = 2025
+YEARS = [str(year) for year in range(START, END + 1)]
+
 
 ALL_MODULES = ("accounts", "indicators", "statements", "reports")
 
@@ -61,7 +64,7 @@ def load_companies(name: str | None = None, whitelist_file: Path | None = None) 
         return {name: COMPANY_CODES[name]}
 
     if whitelist_file is None:
-        whitelist_file = Path(__file__).parent / DEFAULT_WHITELIST
+        whitelist_file = Path(__file__).parent / "companies_json" / DEFAULT_WHITELIST
 
     with whitelist_file.open(encoding="utf-8") as f:
         watchlist: list[str] = json.load(f)
@@ -120,7 +123,7 @@ def run_reports(companies: dict[str, str]) -> None:
 
 
 def main(target: str | None, modules: list[str], whitelist: str | None = None) -> None:
-    whitelist_path = Path(__file__).parent / whitelist if whitelist else None
+    whitelist_path = Path(__file__).parent / "companies_json" / whitelist if whitelist else None
     companies = load_companies(target, whitelist_path)
     corp_codes = list(companies.values())
     # When a single company is requested, default filename logic in

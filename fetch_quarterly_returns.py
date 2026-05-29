@@ -6,7 +6,7 @@ import time
 # 주식 수익률을 가져온다(분기 별 수익률)
 
 RF_QUARTERLY = 0.035 / 4
-START, END = '2020', '2026-05-28'
+START, END = '2015-01-01', '2026-05-28'
 
 SECTORS = {
     'car':  'data/multi_company_indicators/multi_indx_quarterly_car_companies.csv',

@@ -12,13 +12,13 @@ Docs section: docs/opendarts/report_main_info.txt
 from pathlib import Path
 from typing import Optional
 
-from .client import (
+from ..client import (
     DATA_DIR,
     OpenDartClient,
     OpenDartNoDataError,
     REPORT_CODE_ANNUAL,
 )
-from .report_processing import consolidate_report_main_info
+from ..utils.report_processing import consolidate_report_main_info
 
 
 def _year_range_str(years: list[str]) -> str:

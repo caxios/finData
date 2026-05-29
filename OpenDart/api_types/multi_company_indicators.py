@@ -8,7 +8,7 @@ Data is only provided from 2023 Q3 onward.
 from pathlib import Path
 from typing import Optional
 
-from .client import (
+from ..client import (
     DATA_DIR,
     OpenDartClient,
     OpenDartNoDataError,
@@ -21,7 +21,7 @@ from .client import (
     IDX_GROWTH,
     IDX_ACTIVITY,
 )
-from .data_processing import consolidate_indicators_quarterly
+from ..utils.data_processing import consolidate_indicators_quarterly
 
 _QUARTERLY_CODES = [REPORT_CODE_Q1, REPORT_CODE_HALF, REPORT_CODE_Q3, REPORT_CODE_ANNUAL]
 _IDX_CODES = [IDX_PROFITABILITY, IDX_STABILITY, IDX_GROWTH, IDX_ACTIVITY]
