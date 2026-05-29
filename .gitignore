@@ -2,5 +2,5 @@
 .venv/
 __pycache__/
 prompt_contexts/
-auto_corp_cache.json
+companies_json/
 data/

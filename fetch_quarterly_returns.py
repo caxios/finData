@@ -3,6 +3,8 @@ import FinanceDataReader as fdr
 from tqdm import tqdm
 import time
 
+# 주식 수익률을 가져온다(분기 별 수익률)
+
 RF_QUARTERLY = 0.035 / 4
 START, END = '2020', '2026-05-28'
 
@@ -31,8 +33,8 @@ def fetch_stock_returns(stock_code, corp_code):
     df_ret.index = df_ret.index.to_period('Q').astype(str)
     df_ret.index.name = 'period'
     df_ret['corp_code'] = corp_code
-    df_ret['Ex_Return'] = df_ret['Return'] - RF_QUARTERLY
-    df_ret['Next_Ex_Return'] = df_ret['Ex_Return'].shift(-1)
+    # df_ret['Ex_Return'] = df_ret['Return'] - RF_QUARTERLY
+    # df_ret['Next_Ex_Return'] = df_ret['Ex_Return'].shift(-1)
     return df_ret.dropna()
 
 
