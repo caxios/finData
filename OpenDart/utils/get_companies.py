@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-_CACHE_FILE = Path(__file__).parent / "companies_json" / "auto_corp_cache.json"
+_CACHE_FILE = Path(__file__).resolve().parent.parent / "auto_corp_cache.json"
 
 
 def _load_company_codes() -> dict[str, str]:
