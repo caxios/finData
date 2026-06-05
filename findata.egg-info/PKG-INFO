@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: findata
+Version: 0.1.0
+Summary: Financial data fetcher library for SEC and OpenDart
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: requests
+Requires-Dist: dart-fss
+Requires-Dist: python-dotenv
+Requires-Dist: pandas
+Requires-Dist: sec-cik-mapper
+Requires-Dist: beautifulsoup4
+Requires-Dist: yfinance
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Provides-Extra: transcripts
+Requires-Dist: tavily-python; extra == "transcripts"

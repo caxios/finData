@@ -1,0 +1,13 @@
+requests
+dart-fss
+python-dotenv
+pandas
+sec-cik-mapper
+beautifulsoup4
+yfinance
+
+[dev]
+pytest
+
+[transcripts]
+tavily-python

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "findata"
+version = "0.1.0"
+description = "Financial data fetcher library for SEC and OpenDart"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "dart-fss",
+    "python-dotenv",
+    "pandas",
+    "sec-cik-mapper",
+    "beautifulsoup4",
+    "yfinance",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+transcripts = [
+    "tavily-python",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["findata*"]
