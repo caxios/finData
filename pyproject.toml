@@ -16,6 +16,9 @@ dependencies = [
     "sec-cik-mapper",
     "beautifulsoup4",
     "yfinance",
+    "sec-parser",
+    "fastapi",
+    "playwright",
 ]
 
 [project.optional-dependencies]

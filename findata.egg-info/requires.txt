@@ -5,6 +5,9 @@ pandas
 sec-cik-mapper
 beautifulsoup4
 yfinance
+sec-parser
+fastapi
+playwright
 
 [dev]
 pytest

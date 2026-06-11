@@ -11,6 +11,9 @@ Requires-Dist: pandas
 Requires-Dist: sec-cik-mapper
 Requires-Dist: beautifulsoup4
 Requires-Dist: yfinance
+Requires-Dist: sec-parser
+Requires-Dist: fastapi
+Requires-Dist: playwright
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Provides-Extra: transcripts

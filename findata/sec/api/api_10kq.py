@@ -6,7 +6,7 @@ import sqlite3
 from fastapi import Query, HTTPException, Response, APIRouter
 from fastapi.responses import JSONResponse
 from findata.sec.agents.data_loader import _lookup_cik, SEC_10KQ_DB
-from company_data import (
+from findata.sec.company_data import (
     SECRateLimit,
     TickerNotFound,
     get_company_data,
@@ -35,30 +35,46 @@ router = APIRouter(tags=["10KQ"])
 # ---------------------------------------------------------------------------
 @router.get("/api/documents/{ticker}/list")
 def list_documents(ticker: str):
-    """Return a list of available 10-K/10-Q filings for a ticker."""
+    """Return a list of available 10-K/10-Q filings for a ticker.
+    
+    DB-first: queries sec_10kq.db. On miss, fetches from SEC EDGAR
+    via get_company_data (which scrapes + persists), then re-queries.
+    """
     cik, _ = _lookup_cik(ticker)
     if not cik:
         raise HTTPException(status_code=404, detail=f"CIK not found for {ticker}")
-        
-    if not os.path.exists(SEC_10KQ_DB):
-        return {"filings": []}
-        
-    conn = sqlite3.connect(SEC_10KQ_DB)
-    conn.row_factory = sqlite3.Row
-    cik_padded = cik.lstrip("0")
-    
-    rows = conn.execute(
-        """
-        SELECT accession_number, form_type, filing_date, company_name
-        FROM filing_sections
-        WHERE cik IN (?, ?)
-        ORDER BY filing_date DESC
-        """,
-        (cik, cik_padded)
-    ).fetchall()
-    conn.close()
-    
-    return {"filings": [dict(r) for r in rows]}
+
+    def _query_filings(cik_val: str) -> list[dict]:
+        if not os.path.exists(SEC_10KQ_DB):
+            return []
+        conn = sqlite3.connect(SEC_10KQ_DB)
+        conn.row_factory = sqlite3.Row
+        cik_padded = cik_val.lstrip("0")
+        rows = conn.execute(
+            """
+            SELECT accession_number, form_type, filing_date, company_name
+            FROM filing_sections
+            WHERE cik IN (?, ?)
+            ORDER BY filing_date DESC
+            """,
+            (cik_val, cik_padded)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    filings = _query_filings(cik)
+
+    # On-demand fetch: if no cached filings, scrape from SEC and retry
+    if not filings:
+        try:
+            get_company_data(ticker, limit_10kq=4)
+        except (TickerNotFound, SECRateLimit) as e:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch from SEC: {e}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Upstream error while fetching: {e!r}")
+        filings = _query_filings(cik)
+
+    return {"filings": filings}
 
 
 @router.get("/api/documents/{ticker}/{accession_number}")
