@@ -64,6 +64,38 @@ def fetch_filings(cik, count=FILINGS_PER_COMPANY):
 
 
 # ============================================================
+# Per-ticker entry point (works for any ticker, not just WATCHLIST)
+# ============================================================
+def parse_form4_for_ticker(ticker, count=FILINGS_PER_COMPANY, delay=REQUEST_DELAY):
+    """Fetch + parse recent Form 4 filings for any ticker.
+
+    Returns the same list-of-dicts shape that save_to_db expects. Empty list
+    if the ticker can't be resolved to a CIK.
+    """
+    cik, _ = _lookup_cik(ticker)
+    if not cik:
+        return []
+    filings = fetch_filings(cik, count=count)
+    results = []
+    for item in filings:
+        link = item.get("link")
+        if not link:
+            continue
+        try:
+            parsed = parse_form4(link)
+            parsed["rss_meta"] = {
+                "title":     item.get("title"),
+                "form_type": item.get("form_type"),
+                "updated":   item.get("updated"),
+            }
+            results.append(parsed)
+        except Exception as e:
+            print(f"  [WARN] Failed to parse {link}: {e}")
+        time.sleep(delay)
+    return results
+
+
+# ============================================================
 # Main: fetch per-company filings, then parse with form4_parser
 # ============================================================
 def parse_all_form4_from_watchlist(delay=REQUEST_DELAY, count=FILINGS_PER_COMPANY):

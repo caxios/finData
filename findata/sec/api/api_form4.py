@@ -1,9 +1,13 @@
 import os
 from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sqlite3
-from typing import Optional
+from typing import Optional, Union, List
 from fastapi import Query, HTTPException, APIRouter
-from findata.sec.utils.form4.sec_form4_watchlist import parse_all_form4_from_watchlist, WATCHLIST
+from findata.sec.utils.form4.sec_form4_watchlist import (
+    parse_all_form4_from_watchlist,
+    parse_form4_for_ticker,
+    WATCHLIST,
+)
 from findata.sec.utils.form4.form4_parser import parse_all_from_rss
 from findata.sec.utils.form4.form4_db import save_to_db
 
@@ -40,6 +44,71 @@ def _connect(source: str) -> sqlite3.Connection:
     return conn
 
 
+def _tickers_missing_from_db(source: str, tickers: list) -> list:
+    """Return the subset of `tickers` that have zero rows in the DB."""
+    if not tickers:
+        return []
+    try:
+        conn = _connect(source)
+        try:
+            present = {
+                row[0]
+                for row in conn.execute(
+                    f"SELECT DISTINCT ticker FROM insider_trades "
+                    f"WHERE ticker IN ({', '.join('?' * len(tickers))})",
+                    tickers,
+                ).fetchall()
+            }
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:
+        # Table or file doesn't exist yet — everything is missing.
+        return list(tickers)
+    return [t for t in tickers if t not in present]
+
+
+def _db_has_any_rows(source: str) -> bool:
+    try:
+        conn = _connect(source)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM insider_trades LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:
+        return False
+
+
+def _lazy_load(source: str, tickers: list, count: int) -> None:
+    """Populate the DB on demand for the requested scope.
+
+    - If tickers are given, fetch + save only the ones with no rows yet.
+    - Otherwise, if the table is empty/missing, run the per-source refresh.
+    """
+    db_path = _db_path(source)
+    if tickers:
+        missing = _tickers_missing_from_db(source, tickers)
+        for t in missing:
+            filings = parse_form4_for_ticker(t, count=count)
+            if filings:
+                save_to_db(filings, db_path)
+        return
+
+    if _db_has_any_rows(source):
+        return
+    if source == "watchlist":
+        results = parse_all_form4_from_watchlist(count=count)
+        all_filings = []
+        for ticker_filings in results.values():
+            all_filings.extend(ticker_filings)
+    else:
+        all_filings = parse_all_from_rss()
+    if all_filings:
+        save_to_db(all_filings, db_path)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/trades — filtered + paginated trade list
 # ---------------------------------------------------------------------------
@@ -47,7 +116,7 @@ def _connect(source: str) -> sqlite3.Connection:
 @router.get("/api/trades")
 def get_trades(
     source: str = Query("watchlist", description="DB source: 'watchlist' or 'all'"),
-    ticker: Optional[str] = None,
+    ticker: Optional[Union[str, List[str]]] = None,
     owner:  Optional[str] = None,
     code:   Optional[str] = None,
     acquired_or_disposed: Optional[str] = None,
@@ -56,16 +125,39 @@ def get_trades(
     min_value: Optional[float] = None,
     limit:  int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    auto_refresh: bool = True,
+    count: int = Query(5, ge=1, le=40, description="Filings per ticker to fetch on lazy-load"),
 ):
-    """Return insider trades with optional filters and pagination."""
+    """Return insider trades with optional filters and pagination.
+
+    When `auto_refresh=True` (default) and the requested data is not yet in the
+    local DB, this function will fetch + persist it on demand:
+    - If `ticker` is given, any ticker with no rows in the DB is fetched via
+      `parse_form4_for_ticker` (works for any ticker, not just WATCHLIST).
+    - If `ticker` is None and the table is empty/missing, the per-source
+      refresh path is used (RSS for `source='all'`, watchlist for
+      `source='watchlist'`).
+    Pass `auto_refresh=False` for the original read-only behavior.
+    """
+    if isinstance(ticker, str):
+        tickers = [ticker.upper()]
+    elif ticker:
+        tickers = [t.upper() for t in ticker]
+    else:
+        tickers = []
+
+    if auto_refresh:
+        _lazy_load(source, tickers, count)
+
     conn = _connect(source)
 
     clauses = []
     params  = []
 
-    if ticker:
-        clauses.append("ticker = ?")
-        params.append(ticker.upper())
+    if tickers:
+        placeholders = ", ".join("?" * len(tickers))
+        clauses.append(f"ticker IN ({placeholders})")
+        params.extend(tickers)
     if owner:
         clauses.append("owner_name LIKE ?")
         params.append(f"%{owner}%")

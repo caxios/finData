@@ -19,15 +19,14 @@ dependencies = [
     "sec-parser",
     "fastapi",
     "playwright",
+    "tavily-python",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
 ]
-transcripts = [
-    "tavily-python",
-]
+
 
 [tool.setuptools.packages.find]
 where = ["."]

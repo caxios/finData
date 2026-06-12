@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException
-from earnings_call.tavily_transcripts import fetch_transcript
+from findata.sec.utils.earnings_call.tavily_transcripts import fetch_transcript
 import os
 from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sqlite3

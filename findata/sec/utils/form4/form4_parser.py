@@ -33,6 +33,30 @@ def _get_value(elem, path: str) -> str:
     return _get_text(target, "value")
 
 
+_TRANSACTION_CODE_DESC = {
+    "P": "Open market or private purchase of non-derivative or derivative security",
+    "S": "Open market or private sale of non-derivative or derivative security",
+    "V": "Transaction voluntarily reported earlier than required",
+    "A": "Grant, award or other acquisition pursuant to Rule 16b-3(d)",
+    "D": "Disposition to the issuer of issuer equity securities pursuant to Rule 16b-3(e)",
+    "F": "Payment of exercise price or tax liability by delivering or withholding securities incident to the receipt, exercise or vesting of a security issued in accordance with Rule 16b-3",
+    "I": "Discretionary transaction in accordance with Rule 16b-3(f) resulting in acquisition or disposition of issuer securities",
+    "M": "Exercise or conversion of derivative security exempted pursuant to Rule 16b-3",
+    "C": "Conversion of derivative security",
+    "E": "Expiration of short derivative position",
+    "H": "Expiration (or cancellation) of long derivative position with value received",
+    "O": "Exercise of out-of-the-money derivative security",
+    "X": "Exercise of in-the-money or at-the-money derivative security",
+    "G": "Bona fide gift",
+    "L": "Small acquisition under Rule 16a-6",
+    "W": "Acquisition or disposition by will or laws of descent and distribution",
+    "Z": "Deposit into or withdrawal from voting trust",
+    "J": "Other acquisition or disposition (describe transaction)",
+    "K": "Transaction in equity swap or instrument with similar characteristics",
+    "U": "Disposition pursuant to a tender of shares in a change of control transaction",
+}
+
+
 _ROW_SOURCES = [
     ("nonDerivativeTable/nonDerivativeTransaction", "nonDerivativeTransaction", "non-derivative"),
     ("nonDerivativeTable/nonDerivativeHolding",     "nonDerivativeHolding",     "non-derivative"),
@@ -45,6 +69,9 @@ def _extract_row(elem, row_type: str, security_category: str, ticker: str) -> di
     """Extract a single transaction/holding row in a unified shape."""
     amounts = elem.find("transactionAmounts")
     ownership = elem.find("ownershipNature")
+    coding = elem.find("transactionCoding")
+    transaction_code = _get_text(coding, "transactionCode") if coding is not None else ""
+    transaction_code_desc = _TRANSACTION_CODE_DESC.get(transaction_code, "")
     footnote_refs = [
         fn.get("id") for fn in elem.iter("footnoteId") if fn.get("id")
     ]
@@ -78,8 +105,8 @@ def _extract_row(elem, row_type: str, security_category: str, ticker: str) -> di
         "security_category":     security_category,
         "security_title":        _get_value(elem, "securityTitle"),
         "transaction_date":      _get_value(elem, "transactionDate"),
-        "transaction_code":      _get_text(elem.find("transactionCoding"), "transactionCode")
-                                    if elem.find("transactionCoding") is not None else "",
+        "transaction_code":            transaction_code,
+        "transaction_code_description": transaction_code_desc,
         "amount":                _get_value(amounts, "transactionShares"),
         "acquired_or_disposed":  _get_value(amounts, "transactionAcquiredDisposedCode"),
         "price_per_share":       _get_value(amounts, "transactionPricePerShare"),
