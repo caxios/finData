@@ -11,20 +11,16 @@ Reads from:
 from __future__ import annotations
 
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sqlite3
 from typing import Any
 
-# ── Paths ─────────────────────────────────────────────────────────────
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_BACKEND_DIR = os.path.dirname(_HERE)
-_DB_DIR = os.path.join(_BACKEND_DIR, "db")
-
-COMPANY_FACTS_DB = os.path.join(SEC_DB_DIR, "company_facts.db")
-SEC_10KQ_DB = os.path.join(SEC_DB_DIR, "sec_10kq.db")
-EARNINGS_DB = os.path.join(SEC_DB_DIR, "earnings_transcripts.db")
-INSIDER_WATCHLIST_DB = os.path.join(SEC_DB_DIR, "insider_watchlist.db")
-INSIDER_ALL_DB = os.path.join(SEC_DB_DIR, "insider_all.db")
+from findata.server.db.config import (
+    COMPANY_FACTS_DB,
+    SEC_10KQ_DB,
+    EARNINGS_DB,
+    INSIDER_WATCHLIST_DB,
+    INSIDER_ALL_DB,
+)
 
 
 # ── Curated XBRL concepts for assembling the three statements ─────────

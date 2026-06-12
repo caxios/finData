@@ -14,7 +14,6 @@ Requires-Dist: yfinance
 Requires-Dist: sec-parser
 Requires-Dist: fastapi
 Requires-Dist: playwright
+Requires-Dist: tavily-python
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
-Provides-Extra: transcripts
-Requires-Dist: tavily-python; extra == "transcripts"

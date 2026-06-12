@@ -5,7 +5,6 @@ Gemini LLM factory.
 from __future__ import annotations
 
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI

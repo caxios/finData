@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 System prompts for the 4 specialized agents.
 

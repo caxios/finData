@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import re
 import requests
 import xml.etree.ElementTree as ET

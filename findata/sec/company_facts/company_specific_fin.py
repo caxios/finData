@@ -1,15 +1,14 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
-Fetch a single company's XBRL facts from SEC EDGAR and persist to SQLite.
+Fetch a single company's XBRL facts from SEC EDGAR.
+
+Library layer — returns raw JSON dict, no persistence.
 
 Public surface:
-    fetch_and_save(ticker, db_path)  -> int   number of fact rows inserted
-    get_company_facts(ticker)        -> dict | None   raw EDGAR JSON
+    get_company_facts(ticker) -> dict | None   raw EDGAR JSON
 """
 import requests
 
 from findata.sec.const import HEADERS
-from .company_facts_db import save_company_facts
 
 
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -36,15 +35,3 @@ def get_company_facts(ticker: str) -> dict | None:
         return None
     return response.json()
 
-
-def fetch_and_save(ticker: str, db_path: str) -> int:
-    """
-    Fetch companyfacts from SEC EDGAR for `ticker` and persist to `db_path`.
-
-    Returns the number of fact rows inserted (0 if ticker unknown or no facts).
-    """
-    facts = get_company_facts(ticker)
-    if not facts:
-        return 0
-    inserted, _ = save_company_facts(facts, db_path, ticker=ticker.upper())
-    return inserted

@@ -1,7 +1,7 @@
 import os
 from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sqlite3
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Annotated
 from fastapi import Query, HTTPException, APIRouter
 from findata.sec.utils.form4.sec_form4_watchlist import (
     parse_all_form4_from_watchlist,
@@ -115,7 +115,7 @@ def _lazy_load(source: str, tickers: list, count: int) -> None:
 
 @router.get("/api/trades")
 def get_trades(
-    source: str = Query("watchlist", description="DB source: 'watchlist' or 'all'"),
+    source: Annotated[str, Query(description="DB source: 'watchlist' or 'all'")] = "watchlist",
     ticker: Optional[Union[str, List[str]]] = None,
     owner:  Optional[str] = None,
     code:   Optional[str] = None,
@@ -123,10 +123,10 @@ def get_trades(
     date_from: Optional[str] = None,
     date_to:   Optional[str] = None,
     min_value: Optional[float] = None,
-    limit:  int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    limit:  Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
     auto_refresh: bool = True,
-    count: int = Query(5, ge=1, le=40, description="Filings per ticker to fetch on lazy-load"),
+    count: Annotated[int, Query(ge=1, le=40, description="Filings per ticker to fetch on lazy-load")] = 5,
 ):
     """Return insider trades with optional filters and pagination.
 

@@ -2,15 +2,14 @@
 Per-form SQLite layer for the additional SEC filing types.
 
 One DB file per form so each pipeline is independently versionable:
-  - db/sec_8k.db    — 8-K filings (items as JSON blob)
-  - db/sec_s4.db    — S-4 filings (free-form sections)
-  - db/sec_13.db    — SC 13D / SC 13G (cover-page extracted fields)
-  - db/sec_144.db   — Form 144 (structured XML fields)
+  - db/sec_8k.db    ??8-K filings (items as JSON blob)
+  - db/sec_s4.db    ??S-4 filings (free-form sections)
+  - db/sec_13.db    ??SC 13D / SC 13G (cover-page extracted fields)
+  - db/sec_144.db   ??Form 144 (structured XML fields)
 """
 
 import json
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sqlite3
 from typing import Any
 

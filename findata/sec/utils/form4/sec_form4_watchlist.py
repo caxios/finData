@@ -1,10 +1,9 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import time
 import json
 import requests
 from bs4 import BeautifulSoup
 from findata.sec.utils.form4.form4_parser import parse_form4, HEADERS
-from findata.sec.agents.data_loader import _lookup_cik
+from findata.sec._cik import lookup_cik as _lookup_cik
 
 
 # ============================================================

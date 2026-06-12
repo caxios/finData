@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 Pydantic v2 schemas for each agent's structured output.
 Used with `llm.with_structured_output(Schema)` so Gemini returns valid JSON.

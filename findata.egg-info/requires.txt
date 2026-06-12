@@ -8,9 +8,7 @@ yfinance
 sec-parser
 fastapi
 playwright
+tavily-python
 
 [dev]
 pytest
-
-[transcripts]
-tavily-python

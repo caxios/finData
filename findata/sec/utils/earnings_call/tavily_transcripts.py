@@ -1,11 +1,10 @@
 """
 On-demand earnings call transcript pipeline.
 
-Flow: cache check → Tavily search (domain-restricted) → rank candidates →
-Tavily extract → length sanity check → save to earnings_transcripts.db.
+Flow: cache check ??Tavily search (domain-restricted) ??rank candidates ??
+Tavily extract ??length sanity check ??save to earnings_transcripts.db.
 """
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import re
 from urllib.parse import urlparse
 

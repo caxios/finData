@@ -1,5 +1,5 @@
 """
-Dispatcher: form-type → (parser, db).
+Dispatcher: form-type ??(parser, db).
 
 Public entry point: `get_or_parse(form, accession, document_url, ...)`.
 On cache miss, downloads the primary document, parses it, persists, and
@@ -9,7 +9,6 @@ returns the same shape as if it were cached.
 import requests
 import sys
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 from typing import Any
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

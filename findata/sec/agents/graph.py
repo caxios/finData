@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 LangGraph wiring: 3 analyst agents fan out from START in parallel,
 all three converge into the CIO synthesizer, then END.

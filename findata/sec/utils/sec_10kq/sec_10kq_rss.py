@@ -1,22 +1,16 @@
 """
 sec_10kq_rss.py
-───────────────
 Stage 1 of the 10-K / 10-Q pipeline.
 
 Fetches filing metadata from EDGAR's submissions JSON endpoint
-(`data.sec.gov/submissions/CIK##########.json`) and constructs the
-primary-document URL directly from the accession number + primary
-document filename — no index-page scraping required.
-
-Set `include_archive=True` to walk `filings.files` and pull the older
-historical archives in addition to the most-recent set.
+and constructs the primary-document URL directly from the accession
+number + primary document filename.
 """
 
 import time
 import requests
 import sys
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from findata.sec.const import HEADERS
@@ -41,7 +35,7 @@ def _get_json(url: str) -> dict:
 
 
 def _rows_from_recent(cik_padded: str, recent: dict, kept_forms: set[str]) -> list[dict]:
-    """Convert a parallel-array `recent` block into row dicts for the given forms."""
+    """Convert a parallel-array recent block into row dicts for the given forms."""
     forms = recent.get("form", [])
     accs = recent.get("accessionNumber", [])
     dates = recent.get("filingDate", [])
@@ -81,19 +75,16 @@ def fetch_and_resolve(
     include_archive: bool = False,
     forms: set[str] | None = None,
 ) -> list[dict]:
-    """
-    Fetch filing metadata for `cik` and return up to `count` rows with
+    """Fetch filing metadata for cik and return up to count rows with
     primary-document URLs already resolved.
 
     Args:
         cik:             Zero-padded or unpadded CIK.
         count:           Maximum number of rows to return.
-        include_archive: When True, also walk `filings.files` for older
-                         archives. Otherwise only `filings.recent` is used.
-        forms:           Set of form types to keep (e.g. {"10-K", "10-Q"} or
-                         {"8-K", "S-4"}). Defaults to {"10-K", "10-Q"}.
+        include_archive: When True, also walk filings.files for older archives.
+        forms:           Set of form types to keep. Defaults to 10-K, 10-Q.
 
-    Returns rows sorted by filing_date desc, capped to `count`.
+    Returns rows sorted by filing_date desc, capped to count.
     """
     kept_forms = forms if forms else DEFAULT_FORMS
     cik_padded = _pad_cik(cik)

@@ -4,29 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "findata"
-version = "0.1.0"
-description = "Financial data fetcher library for SEC and OpenDart"
+version = "0.2.0"
+description = "Financial data library for SEC and OpenDart"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "requests",
-    "dart-fss",
     "python-dotenv",
-    "pandas",
     "sec-cik-mapper",
     "beautifulsoup4",
-    "yfinance",
-    "sec-parser",
-    "fastapi",
-    "playwright",
-    "tavily-python",
+    "lxml",
 ]
 
 [project.optional-dependencies]
+server = [
+    "fastapi",
+    "uvicorn",
+    "playwright",
+]
+transcripts = [
+    "tavily-python",
+]
+dart = [
+    "dart-fss",
+    "pandas",
+]
+sec-parser = [
+    "sec-parser",
+]
+all = [
+    "findata[server,transcripts,dart,sec-parser]",
+]
 dev = [
     "pytest",
 ]
-
 
 [tool.setuptools.packages.find]
 where = ["."]

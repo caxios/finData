@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
+from findata.server.db.config import SEC_DB_DIR
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any

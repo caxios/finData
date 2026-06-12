@@ -26,7 +26,6 @@ except ImportError:
 
 import sys
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 # Ensure parent directory is in path so we can import const
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from findata.sec.const import HEADERS

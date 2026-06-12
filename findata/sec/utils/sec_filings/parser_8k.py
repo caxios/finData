@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 8-K parser.
 
@@ -34,7 +33,7 @@ def parse_8k(html: str) -> dict:
             continue
         items.append({"code": code, "title": title, "text": body})
 
-    # De-dupe consecutive entries with the same code (TOC + actual body) —
+    # De-dupe consecutive entries with the same code (TOC + actual body) ??
     # keep the longer body.
     deduped: dict[str, dict] = {}
     for it in items:

@@ -10,7 +10,6 @@ Usage:
 """
 
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 import sys
 import time
 import argparse

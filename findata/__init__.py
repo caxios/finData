@@ -1,50 +1,37 @@
 """
-finData - Unified financial data fetcher for Korean and US markets.
+findata — Financial data library for SEC and OpenDART.
 
-Usage:
+Pure library layer: all functions fetch data from public APIs and return
+``list[dict]`` in memory. Nothing is saved to disk.
+
+Usage::
+
     import findata
 
-    # US SEC data
-    data = findata.get_sec_financials("AAPL")
+    # SEC insider trades (Form 4)
+    trades = findata.get_insider_trades("AAPL")
+
+    # SEC 10-K/10-Q filings with parsed sections
+    filings = findata.get_filings("AAPL")
+
+    # SEC XBRL financial facts
+    facts = findata.get_financials("AAPL")
 
     # Earnings call transcript (requires: pip install findata[transcripts])
-    transcript = findata.fetch_transcript("AAPL", fiscal_year=2024, fiscal_quarter=4)
+    transcript = findata.get_transcript("AAPL", year=2024, quarter=4)
+
+For the commercial API server, see ``findata.server``.
 """
 
-from findata.sec.company_data import get_company_data as get_sec_financials
-
-
-def fetch_transcript(
-    ticker: str,
-    fiscal_year: int,
-    fiscal_quarter: int,
-    force_refresh: bool = False,
-    **kwargs,
-) -> dict | None:
-    """Fetch an earnings call transcript. Requires tavily-python.
-
-    Install with: pip install findata[transcripts]
-    """
-    try:
-        from findata.sec.utils.earnings_call.tavily_transcripts import (
-            fetch_transcript as _fetch,
-        )
-    except ImportError as e:
-        raise ImportError(
-            "fetch_transcript requires the 'tavily-python' package. "
-            "Install it with: pip install findata[transcripts]"
-        ) from e
-
-    return _fetch(
-        ticker=ticker,
-        fiscal_year=fiscal_year,
-        fiscal_quarter=fiscal_quarter,
-        force_refresh=force_refresh,
-        **kwargs,
-    )
-
+from findata.sec.form4 import get_insider_trades
+from findata.sec.filings import get_filings, get_filing_text
+from findata.sec.financials import get_financials
+from findata.sec.transcripts import get_transcript
 
 __all__ = [
-    "get_sec_financials",
-    "fetch_transcript",
+    "get_insider_trades",
+    "get_filings",
+    "get_filing_text",
+    "get_financials",
+    "get_transcript",
 ]

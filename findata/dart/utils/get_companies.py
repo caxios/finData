@@ -1,4 +1,4 @@
-from findata.core.config import DART_CACHE_DIR
+from findata.core.config import DATA_DIR
 """
 get_companies.py – Fetch and cache all publicly traded Korean corporate codes.
 
@@ -24,7 +24,9 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-_CACHE_FILE = DART_CACHE_DIR / "auto_corp_cache.json"
+_DART_CACHE_DIR = DATA_DIR / "dart_cache"
+_DART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CACHE_FILE = _DART_CACHE_DIR / "auto_corp_cache.json"
 
 
 def _load_company_codes() -> dict[str, str]:

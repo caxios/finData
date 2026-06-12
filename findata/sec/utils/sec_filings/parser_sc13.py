@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 SC 13D / SC 13G parser.
 
@@ -25,7 +24,7 @@ def parse_sc13(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text("\n", strip=True)
 
-    # "Names of Reporting Persons" → next non-empty line is the name.
+    # "Names of Reporting Persons" ??next non-empty line is the name.
     owner = _first_match(
         [
             r"name(?:s)?\s+of\s+reporting\s+person[^\n]*\n+([^\n]{2,150})",

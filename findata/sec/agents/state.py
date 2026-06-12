@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """
 LangGraph state definition for the multi-agent analysis pipeline.
 """
@@ -32,5 +31,5 @@ class AnalysisState(TypedDict, total=False):
     business_report: BusinessReport | None
     sentiment_report: SentimentReport | None
     final_memo: InvestmentMemo | None
-    # Errors are appended from any node — use `add` reducer so parallel writes merge.
+    # Errors are appended from any node ??use `add` reducer so parallel writes merge.
     errors: Annotated[list[str], add]

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 
 from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase

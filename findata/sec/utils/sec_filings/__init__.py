@@ -1,4 +1,3 @@
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
 """Per-form SEC filing parsers + storage.
 
 Form types covered (10-K/10-Q live in ../sec_10kq, Form 4 lives in ../form4):
