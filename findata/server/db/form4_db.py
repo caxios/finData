@@ -1,5 +1,7 @@
 import sqlite3
 
+from findata.server.db.config import ensure_parent_dir
+
 
 def _to_float(val):
     """Safely convert a string to float, returning None if empty/invalid."""
@@ -13,6 +15,7 @@ def _to_float(val):
 
 def init_db(db_path: str):
     """Create the insider_trades table if it doesn't already exist."""
+    ensure_parent_dir(db_path)
     conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS insider_trades (

@@ -9,7 +9,6 @@ fetches only when the cached data is missing or stale.
 from __future__ import annotations
 
 import os
-from findata.server.db.config import SEC_DB_DIR
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta

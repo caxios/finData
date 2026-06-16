@@ -1,7 +1,8 @@
 import sqlite3
 import yfinance as yf
 import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
+
+from findata.server.db.config import INSIDER_ALL_DB, INSIDER_WATCHLIST_DB
 
 def backfill_db(db_path):
     conn = sqlite3.connect(db_path)
@@ -36,9 +37,7 @@ def backfill_db(db_path):
     print(f"Finished backfilling {updated_count} tickers in {db_path}.\n")
 
 if __name__ == "__main__":
-    db_dir = os.path.join(os.path.dirname(__file__), "db")
-    for db_name in ["insider_all.db", "insider_watchlist.db"]:
-        db_path = os.path.join(db_dir, db_name)
+    for db_path in [INSIDER_ALL_DB, INSIDER_WATCHLIST_DB]:
         if os.path.exists(db_path):
             print(f"Processing {db_path}...")
             backfill_db(db_path)

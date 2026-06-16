@@ -37,8 +37,8 @@ from datetime import datetime
 # The OpenDart and Sec directories have been migrated into the `findata` package.
 # Ensure you run `pip install -e .` to install the package locally.
 PROJECT_ROOT = Path(__file__).resolve().parent
-from findata.sec.company_data import get_company_data, TickerNotFound, SECRateLimit
-from findata.core.config import GENERAL_DATA_DIR
+from findata.server.company_data import get_company_data, TickerNotFound, SECRateLimit
+from findata.server.db.config import GENERAL_DATA_DIR
 
 
 
@@ -149,8 +149,6 @@ def fetch_us_data(
     limit_form4: int = 30,
 ) -> None:
     """Fetch financial data from US SEC EDGAR for given tickers."""
-    from company_data import get_company_data, TickerNotFound, SECRateLimit
-
     print(f"  Tickers     : {', '.join(tickers)}")
     print(f"  Limit 10K/Q : {limit_10kq}")
     print(f"  Limit Form4 : {limit_form4}")

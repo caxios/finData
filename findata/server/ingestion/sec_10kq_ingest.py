@@ -9,19 +9,14 @@ Usage:
     python sec_10kq_pipeline.py --count 3 --dry  # dry-run (no DB writes)
 """
 
-import os
-from findata.core.config import SEC_DB_DIR, DART_CACHE_DIR
-import sys
 import time
 import argparse
 import logging
 
-# Ensure parent directory is in path so absolute imports work
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from findata.server.db.config import SEC_10KQ_DB
+from findata.server.db.sec_10kq_db import save_batch, get_filing_count
 from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
 from findata.sec.utils.sec_10kq.sec_10kq_parser import parse_single_filing
-from findata.sec.utils.sec_10kq.sec_10kq_db import save_batch, get_filing_count
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +48,7 @@ DEFAULT_COUNT = 5
 # SEC rate limit delay between filings (seconds)
 FILING_DELAY = 0.3
 
-# Database path (pointing to backend/db/)
-DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "db")
-DB_PATH = os.path.join(SEC_DB_DIR, "sec_10kq.db")
+DB_PATH = SEC_10KQ_DB
 
 
 # ============================================================
@@ -71,8 +64,6 @@ def run_pipeline(count: int = DEFAULT_COUNT, dry_run: bool = False):
         count:   Max number of filings to fetch per company.
         dry_run: If True, parse but don't save to DB.
     """
-    os.makedirs(DB_DIR, exist_ok=True)
-
     total_parsed = []
     total_start = time.time()
 

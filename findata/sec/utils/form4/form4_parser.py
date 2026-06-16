@@ -1,14 +1,26 @@
 import re
 import requests
 import xml.etree.ElementTree as ET
-from sec_cik_mapper import StockMapper
-import yfinance as yf
+from functools import lru_cache
 
 HEADERS = {
     "User-Agent": "YourName your.email@example.com",  # Replace with real info
     "Accept-Encoding": "gzip, deflate",
 }
-mapper = StockMapper()
+
+
+@lru_cache(maxsize=1)
+def _get_stock_mapper():
+    from sec_cik_mapper import StockMapper
+    return StockMapper()
+
+
+def _ticker_from_cik(cik: str, fallback: str = "") -> str:
+    try:
+        tickers = _get_stock_mapper().cik_to_tickers.get(str(cik).zfill(10), set())
+    except Exception:
+        return fallback
+    return next(iter(tickers), fallback)
 
 
 def _index_to_txt_url(index_url: str) -> str:
@@ -158,8 +170,10 @@ def _parse_form4_xml(xml_text: str, source_url: str = "") -> dict:
         "cik":            _get_text(issuer_elem, "issuerCik")            if issuer_elem is not None else "",
         "trading_symbol": _get_text(issuer_elem, "issuerTradingSymbol") if issuer_elem is not None else "",
     }
-    tickers = mapper.cik_to_tickers.get(issuer['cik'], set())
-    ticker = next(iter(tickers)) if tickers else issuer.get('trading_symbol', '')
+    ticker = _ticker_from_cik(
+        issuer.get("cik", ""),
+        issuer.get("trading_symbol", ""),
+    )
     reporting_owners = [_extract_reporting_owner(rp) for rp in root.findall("reportingOwner")]
 
     transactions = []

@@ -152,9 +152,9 @@ CIO 에이전트는 3개의 하위 분석 에이전트(재무/리스크/감성)�
 
 ---
 
-## 레거시 코드
+## 레거시 호환 경로
 
-> ⚠️ **`findata/sec/app.py`는 레거시 파일입니다.**  
-> 리팩토링 이전의 FastAPI 엔트리포인트로, 상대 임포트(`from api import ...`)를 사용합니다.  
-> 현재 정상 엔트리포인트는 `findata/server/app.py`입니다.  
-> 향후 삭제 예정입니다.
+> **`findata.sec.app` 및 `findata.sec.api.*`는 deprecated wrapper입니다.**
+> 실제 구현은 `findata.server.app` 및 `findata.server.api.*`에 있습니다.
+> 새 코드는 `python -m findata.server.app` 또는 `uvicorn findata.server.app:app`을 사용하세요.
+> 기존 import 경로는 호환을 위해 유지되며 `DeprecationWarning`을 발생시킵니다.

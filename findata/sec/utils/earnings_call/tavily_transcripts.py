@@ -16,7 +16,8 @@ except ImportError:
 
 from tavily import TavilyClient
 
-from findata.sec.utils.earnings_call.earnings_transcripts_db import find_cached, save_transcript
+from findata.server.db.config import EARNINGS_DB
+from findata.server.db.earnings_db import find_cached, save_transcript
 
 
 TRANSCRIPT_DOMAINS = [
@@ -67,7 +68,7 @@ def fetch_transcript(
     ticker: str,
     fiscal_year: int,
     fiscal_quarter: int,
-    db_path: str = os.path.join(SEC_DB_DIR, "earnings_transcripts.db"),
+    db_path: str = EARNINGS_DB,
     force_refresh: bool = False,
 ) -> dict | None:
     """

@@ -37,7 +37,7 @@ from findata.dart import (
     ReportMainInfo,
     OpenDartError,
 )
-from get_companies import COMPANY_CODES
+from findata.dart.utils.get_companies import COMPANY_CODES
 
 WHITELIST_FILES = ['semi_companies.json', 'car_companies.json', 'ship_companies.json']
 DEFAULT_WHITELIST = 'car_companies.json'

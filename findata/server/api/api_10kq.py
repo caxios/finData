@@ -1,7 +1,6 @@
 import sys
 import asyncio
 import os
-from findata.server.db.config import SEC_DB_DIR
 import sqlite3
 from fastapi import Query, HTTPException, Response, APIRouter
 from fastapi.responses import JSONResponse
@@ -27,7 +26,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # App
 # ---------------------------------------------------------------------------
 # [에러 해결 핵심 코드] 윈도우 환경일 경우 Proactor 이벤트 루프 정책을 강제로 설정합니다.
-if sys.platform == "win32" or "win64":
+if sys.platform in ("win32", "win64"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 router = APIRouter(tags=["10KQ"])
@@ -376,7 +375,7 @@ def get_filing_text(
     On cache miss this downloads the primary document, parses it with the
     form-specific parser, and persists to that form's DB.
     """
-    from sec_filings.dispatcher import get_or_parse, PARSEABLE_FORMS
+    from findata.sec.utils.sec_filings.dispatcher import get_or_parse, PARSEABLE_FORMS
 
     if form not in PARSEABLE_FORMS:
         raise HTTPException(

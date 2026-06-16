@@ -10,9 +10,10 @@ One DB file per form so each pipeline is independently versionable:
 
 import json
 import os
-from findata.server.db.config import SEC_DB_DIR
 import sqlite3
 from typing import Any
+
+from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_DIR = os.path.join(BASE_DIR, "db")
@@ -84,8 +85,8 @@ def _schema_key(form: str) -> str:
 
 
 def _connect(form: str) -> sqlite3.Connection:
-    os.makedirs(DB_DIR, exist_ok=True)
     db_path = DB_PATHS[form]
+    ensure_parent_dir(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMAS[_schema_key(form)])

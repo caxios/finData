@@ -4,3 +4,8 @@ __pycache__/
 prompt_contexts/
 companies_json/
 data/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+uv.lock

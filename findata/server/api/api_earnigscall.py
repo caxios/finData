@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException
 from findata.sec.utils.earnings_call.tavily_transcripts import fetch_transcript
 import os
-from findata.server.db.config import SEC_DB_DIR
+from findata.server.db.config import EARNINGS_DB
 import sqlite3
 
 # ---------------------------------------------------------------------------
@@ -10,7 +10,7 @@ import sqlite3
 router = APIRouter(tags=["EarningsCall"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRANSCRIPTS_DB = os.path.join(SEC_DB_DIR, "earnings_transcripts.db")
+TRANSCRIPTS_DB = EARNINGS_DB
 
 @router.get("/api/transcript")
 def get_transcript(
