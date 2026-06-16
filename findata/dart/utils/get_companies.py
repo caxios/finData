@@ -7,7 +7,7 @@ for listed companies (those with a valid stock_code), and stores the result
 in a local JSON cache so the API is only called once.
 
 Usage from another script:
-    from get_companies import COMPANY_CODES
+    from findata.dart.utils.get_companies import COMPANY_CODES
 
     code = COMPANY_CODES.get("삼성전자")
     if code:

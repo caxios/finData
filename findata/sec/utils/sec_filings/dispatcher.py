@@ -7,15 +7,11 @@ returns the same shape as if it were cached.
 """
 
 import requests
-import sys
-import os
 from typing import Any
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from findata.sec.const import HEADERS
-
-from sec_filings.db import save_filing, select_filing, DB_PATHS
-from sec_filings import parser_8k, parser_s4, parser_sc13, parser_144
+from findata.server.db.sec_filings_db import save_filing, select_filing, DB_PATHS
+from findata.sec.utils.sec_filings import parser_8k, parser_s4, parser_sc13, parser_144
 
 PARSEABLE_FORMS = set(DB_PATHS.keys())
 

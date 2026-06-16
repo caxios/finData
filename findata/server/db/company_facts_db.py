@@ -1,8 +1,11 @@
 import sqlite3
 
+from findata.server.db.config import ensure_parent_dir
+
 
 def init_db(db_path: str):
     """Create companies + company_facts tables if they don't exist."""
+    ensure_parent_dir(db_path)
     conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS companies (

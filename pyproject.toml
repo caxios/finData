@@ -21,6 +21,11 @@ server = [
     "fastapi",
     "uvicorn",
     "playwright",
+    "tavily-python",
+    "langgraph",
+    "langchain-core",
+    "langchain-community",
+    "langchain-google-genai",
 ]
 transcripts = [
     "tavily-python",
@@ -32,11 +37,18 @@ dart = [
 sec-parser = [
     "sec-parser",
 ]
+agents = [
+    "langgraph",
+    "langchain-core",
+    "langchain-community",
+    "langchain-google-genai",
+]
 all = [
-    "findata[server,transcripts,dart,sec-parser]",
+    "findata[server,dart,sec-parser]",
 ]
 dev = [
     "pytest",
+    "tomli; python_version < '3.11'",
 ]
 
 [tool.setuptools.packages.find]

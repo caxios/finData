@@ -72,11 +72,11 @@ from findata.dart import (
 
 # ── 단일회사 전체 재무제표 ──
 stmt = SingleCompanyStatements()
-df = stmt.fetch("삼성전자", bsns_year="2024", reprt_code=REPORT_CODE_ANNUAL)
+rows = stmt.get("005930", bsns_year="2024", reprt_code=REPORT_CODE_ANNUAL)
 
 # ── 다중회사 주요계정 ──
 acnt = MultiCompanyAccounts()
-df = acnt.fetch(
+rows = acnt.get(
     corp_codes=["005930", "000660"],
     bsns_year="2024",
     reprt_code=REPORT_CODE_ANNUAL,
@@ -84,16 +84,19 @@ df = acnt.fetch(
 
 # ── 다중회사 재무지표 ──
 idx = MultiCompanyIndicators()
-df = idx.fetch(
+rows = idx.get(
     corp_codes=["005930"],
     bsns_year="2024",
     reprt_code=REPORT_CODE_ANNUAL,
+    idx_cl_code="M210000",
 )
 
 # ── 정기보고서 주요정보 (30개 엔드포인트) ──
 rpt = ReportMainInfo()
-df = rpt.fetch_증자감자("005930", bgn_de="20240101", end_de="20241231")
+rows = rpt.get_capital_change("005930", bsns_year="2024")
 ```
+
+OpenDART 클래스의 `save_*` / `save_quarterly()` 메서드는 사용자가 명시적으로 호출할 때만 CSV/JSON 파일을 저장합니다.
 
 ---
 
@@ -110,6 +113,10 @@ python -m findata.server.app
 # → FastAPI at http://0.0.0.0:8000
 # → Swagger UI: http://localhost:8000/docs
 ```
+
+`.[server]`는 현재 서버 앱에 등록된 전체 라우터(Form 4, 10-K/Q, transcript, CIO chat)를 import하고 실행하는 데 필요한 의존성을 모두 설치합니다.
+
+이전 `findata.sec.app` 및 `findata.sec.api.*` 경로는 호환 wrapper로 남아 있지만 deprecated 상태입니다. 새 코드는 `findata.server.*` 경로를 사용하세요.
 
 ### API 엔드포인트 요약
 

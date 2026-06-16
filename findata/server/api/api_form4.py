@@ -1,5 +1,5 @@
 import os
-from findata.server.db.config import SEC_DB_DIR
+from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
 import sqlite3
 from typing import Optional, Union, List, Annotated
 from fastapi import Query, HTTPException, APIRouter
@@ -39,7 +39,9 @@ def _db_path(source: str) -> str:
 
 def _connect(source: str) -> sqlite3.Connection:
     """Open a connection with Row factory for dict-like access."""
-    conn = sqlite3.connect(_db_path(source))
+    path = _db_path(source)
+    ensure_parent_dir(path)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -431,5 +433,4 @@ def refresh(
         "inserted": inserted,
         "skipped":  skipped,
     }
-
 

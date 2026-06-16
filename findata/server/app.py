@@ -13,16 +13,22 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from findata.server.api import api_form4, api_earnigscall, api_10kq, api_cio_chat
+from findata.server.db.config import ensure_data_dirs
 
 
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 # Windows event loop policy
-if sys.platform == "win32" or "win64":
+if sys.platform in ("win32", "win64"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI(title="findata API Server")
+
+
+@app.on_event("startup")
+def _ensure_data_dirs() -> None:
+    ensure_data_dirs()
 
 app.add_middleware(
     CORSMiddleware,

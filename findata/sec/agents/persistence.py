@@ -8,20 +8,19 @@ from __future__ import annotations
 
 import json
 import os
-from findata.server.db.config import SEC_DB_DIR
+from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_DIR = os.path.dirname(_HERE)
-_DB_DIR = os.path.join(_BACKEND_DIR, "db")
 _ANALYSES_DIR = os.path.join(SEC_DB_DIR, "analyses")
 ANALYSIS_DB = os.path.join(SEC_DB_DIR, "analysis.db")
 
 
 def _ensure_dirs() -> None:
-    os.makedirs(_DB_DIR, exist_ok=True)
+    ensure_parent_dir(ANALYSIS_DB)
     os.makedirs(_ANALYSES_DIR, exist_ok=True)
 
 

@@ -2,9 +2,12 @@ import sqlite3
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from findata.server.db.config import ensure_parent_dir
+
 
 def init_db(db_path: str):
     """Create earnings_transcripts table + FTS5 mirror if they don't exist."""
+    ensure_parent_dir(db_path)
     conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS earnings_transcripts (
