@@ -1,0 +1,11 @@
+{
+  "_comment": "The data universe to eagerly pre-warm and keep fresh on a schedule (plan 06 §3.1). Everything outside this set is served lazily on demand (plan 05). This is a STARTER set — expand 'us' toward the full S&P 500 and 'kr' toward KOSPI/KOSDAQ majors. Override the whole file with the FINDATA_UNIVERSE_FILE env var.",
+  "us": [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN",
+    "META", "TSLA", "AVGO", "JPM", "V"
+  ],
+  "kr": [
+    "삼성전자", "SK하이닉스", "현대차", "카카오", "NAVER",
+    "LG에너지솔루션", "기아", "셀트리온", "POSCO홀딩스", "삼성바이오로직스"
+  ]
+}

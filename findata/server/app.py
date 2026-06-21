@@ -48,6 +48,7 @@ def _startup() -> None:
     ensure_usage_schema()
     ensure_upstream_schema()
     _maybe_start_form4_poller()
+    _maybe_start_scheduled_ingestion()
 
 
 # ── Form 4 background poller (single-instance MVP, opt-in) ───────────
@@ -70,10 +71,26 @@ def _maybe_start_form4_poller() -> None:
     _poller_stop = start_background_poller(poll_interval=interval)
 
 
+# ── Scheduled ingestion (financials/filings; single-instance MVP, opt-in) ──
+# Gated behind ENABLE_SCHEDULED_INGESTION so only ONE process runs it. For
+# multi-instance deployments, run the worker separately (08_deployment_and_infra).
+_scheduler_stop = None
+
+
+def _maybe_start_scheduled_ingestion() -> None:
+    global _scheduler_stop
+    if os.getenv("ENABLE_SCHEDULED_INGESTION", "0") != "1":
+        return
+    from findata.server.ingestion.scheduled import start_background_scheduler
+    _scheduler_stop = start_background_scheduler()
+
+
 @app.on_event("shutdown")
 def _shutdown() -> None:
     if _poller_stop is not None:
         _poller_stop.set()
+    if _scheduler_stop is not None:
+        _scheduler_stop.set()
 
 
 # ── Middleware (order matters: outermost runs first) ─────────────────

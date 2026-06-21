@@ -27,20 +27,36 @@ logger = logging.getLogger(__name__)
 
 from sec_cik_mapper import StockMapper
 
-# List of tickers to track
-TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL"]
+from findata.server.ingestion.universe import get_us_universe
 
 # Dynamically map tickers to zero-padded CIKs using sec_cik_mapper
 mapper = StockMapper()
 ticker_to_cik = mapper.ticker_to_cik
 
-WATCHLIST = []
-for ticker in TICKERS:
-    cik = ticker_to_cik.get(ticker)
-    if cik:
-        WATCHLIST.append((ticker, cik))
-    else:
-        print(f"[WARN] Could not find CIK for ticker: {ticker}")
+# Fallback sample if the universe config can't be loaded.
+_FALLBACK_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL"]
+
+
+def _resolve_watchlist(tickers: list[str]) -> list[tuple[str, str]]:
+    """Resolve tickers → [(ticker, cik), ...], skipping unresolved ones."""
+    resolved: list[tuple[str, str]] = []
+    for ticker in tickers:
+        cik = ticker_to_cik.get(ticker)
+        if cik:
+            resolved.append((ticker, cik))
+        else:
+            print(f"[WARN] Could not find CIK for ticker: {ticker}")
+    return resolved
+
+
+def _default_tickers() -> list[str]:
+    """Universe US tickers, falling back to the built-in sample."""
+    return get_us_universe() or _FALLBACK_TICKERS
+
+
+# Tickers tracked by the default batch run (derived from the universe config).
+TICKERS = _default_tickers()
+WATCHLIST = _resolve_watchlist(TICKERS)
 
 # Default number of filings to process per company
 DEFAULT_COUNT = 5
@@ -55,27 +71,32 @@ DB_PATH = SEC_10KQ_DB
 # Pipeline Orchestrator
 # ============================================================
 
-def run_pipeline(count: int = DEFAULT_COUNT, dry_run: bool = False):
+def run_pipeline(count: int = DEFAULT_COUNT, dry_run: bool = False, watchlist=None):
     """
     Run the full 10-K / 10-Q extraction pipeline for all companies
     in the watchlist.
 
     Args:
-        count:   Max number of filings to fetch per company.
-        dry_run: If True, parse but don't save to DB.
+        count:     Max number of filings to fetch per company.
+        dry_run:   If True, parse but don't save to DB.
+        watchlist: Optional list of (ticker, cik) tuples. Defaults to the
+                   module-level WATCHLIST (derived from the universe config).
     """
+    if watchlist is None:
+        watchlist = WATCHLIST
+
     total_parsed = []
     total_start = time.time()
 
     print("=" * 60)
     print("SEC 10-K / 10-Q Text Extraction Pipeline")
-    print(f"  Watchlist:  {len(WATCHLIST)} companies")
+    print(f"  Watchlist:  {len(watchlist)} companies")
     print(f"  Max count:  {count} filings per company")
     print(f"  Database:   {DB_PATH}")
     print(f"  Dry run:    {dry_run}")
     print("=" * 60)
 
-    for ticker, cik in WATCHLIST:
+    for ticker, cik in watchlist:
         print(f"\n{'─' * 50}")
         print(f"  [{ticker}] CIK: {cik}")
         print(f"{'─' * 50}")
@@ -145,6 +166,30 @@ def run_pipeline(count: int = DEFAULT_COUNT, dry_run: bool = False):
 
     print(f"{'=' * 60}")
     return total_parsed
+
+
+# ============================================================
+# Schedulable entrypoint (plan 06 Step 3)
+# ============================================================
+
+def run_10kq_refresh(universe: list[str] | None = None, count: int = DEFAULT_COUNT,
+                     dry_run: bool = False):
+    """Refresh 10-K/10-Q filings for the universe (schedulable callable).
+
+    A daily run is cheap because ``save_batch`` dedupes against existing rows —
+    only genuinely new filings are processed (plan 06 §3.2).
+
+    Args:
+        universe: US tickers to refresh. Defaults to the configured universe.
+        count:    Filings per company to check.
+        dry_run:  Parse but don't write.
+
+    Returns the list of parsed filings.
+    """
+    tickers = universe if universe is not None else _default_tickers()
+    watchlist = _resolve_watchlist([t.upper() for t in tickers])
+    logger.info("10-K/Q refresh: %d companies (count=%d)", len(watchlist), count)
+    return run_pipeline(count=count, dry_run=dry_run, watchlist=watchlist)
 
 
 # ============================================================

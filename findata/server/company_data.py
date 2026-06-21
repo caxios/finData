@@ -31,8 +31,12 @@ from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
 
 
 # ── Freshness policy ────────────────────────────────────────────────────
-TTL_10KQ_DAYS = 90
-TTL_FORM4_DAYS = 7
+# TTLs live in one place (findata.server.ingestion.freshness) so the read path
+# and the schedulers can't drift apart (plan 06 §3.3).
+from findata.server.ingestion.freshness import get_ttl_days as _get_ttl_days
+
+TTL_10KQ_DAYS = _get_ttl_days("10kq")
+TTL_FORM4_DAYS = _get_ttl_days("form4")
 
 # Default 10-K/Q rows to surface in a response (caller can override).
 # A staleness re-scrape always pulls at least this many.
