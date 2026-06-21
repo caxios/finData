@@ -36,6 +36,7 @@ INSIDER_ALL_DB = str(SEC_DB_DIR / "insider_all.db")
 SEC_10KQ_DB = str(SEC_DB_DIR / "sec_10kq.db")
 COMPANY_FACTS_DB = str(SEC_DB_DIR / "company_facts.db")
 EARNINGS_DB = str(SEC_DB_DIR / "earnings_transcripts.db")
+ACCOUNTS_DB = str(SEC_DB_DIR / "accounts.db")
 
 
 def ensure_data_dirs() -> None:

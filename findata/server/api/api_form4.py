@@ -1,15 +1,26 @@
 import os
+import threading
+from datetime import datetime, timezone
 from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
 import sqlite3
-from typing import Optional, Union, List, Annotated
-from fastapi import Query, HTTPException, APIRouter
+from typing import Optional, List, Annotated
+from fastapi import Query, HTTPException, APIRouter, Request
 from findata.sec.utils.form4.sec_form4_watchlist import (
     parse_all_form4_from_watchlist,
     parse_form4_for_ticker,
     WATCHLIST,
 )
 from findata.sec.utils.form4.form4_parser import parse_all_from_rss
-from findata.server.db.form4_db import save_to_db
+from findata.sec.utils.form4.form4_submissions import (
+    fetch_form4_by_period,
+    TickerNotFound,
+)
+from findata.server.db.form4_db import (
+    save_to_db,
+    is_covered,
+    record_coverage,
+)
+from findata.server.billing.costs import LAZY_FETCH_CREDITS
 
 
 # ---------------------------------------------------------------------------
@@ -83,23 +94,89 @@ def _db_has_any_rows(source: str) -> bool:
         return False
 
 
-def _lazy_load(source: str, tickers: list, count: int) -> None:
+# Single-flight: serialize identical concurrent fetches so 10 users asking for
+# the same uncached (ticker, period) trigger ONE upstream fetch, not ten.
+_inflight_lock = threading.Lock()
+_inflight: dict = {}
+
+
+def _flight_lock(key: tuple) -> threading.Lock:
+    with _inflight_lock:
+        lk = _inflight.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _inflight[key] = lk
+        return lk
+
+
+def _lazy_load(
+    source: str,
+    tickers: list,
+    count: int,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> int:
     """Populate the DB on demand for the requested scope.
 
-    - If tickers are given, fetch + save only the ones with no rows yet.
-    - Otherwise, if the table is empty/missing, run the per-source refresh.
+    - Tickers + a date range → historical backfill via submissions JSON, gated
+      by per-(ticker, window) coverage so each window is fetched at most once.
+    - Tickers, no date range → fetch recent N for any ticker with no rows yet.
+    - No tickers → if the table is empty/missing, run the per-source refresh.
+
+    Returns the number of upstream fetch operations performed (used to bill the
+    cache-miss as a higher-credit event — plan 05 §3.3).
+
+    Raises HTTPException(422) if a requested ticker can't be resolved to a CIK.
     """
     db_path = _db_path(source)
+    fetches = 0
+
     if tickers:
+        # ── Historical / period-aware backfill ──────────────────────
+        if date_from or date_to:
+            lo = date_from or "0001-01-01"
+            hi = date_to or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            for t in tickers:
+                if is_covered(db_path, t, lo, hi):
+                    continue
+                lock = _flight_lock((db_path, t, lo, hi))
+                with lock:
+                    # Double-check inside the lock: a concurrent request may
+                    # have just recorded coverage while we waited.
+                    if is_covered(db_path, t, lo, hi):
+                        continue
+                    try:
+                        filings = fetch_form4_by_period(t, lo, hi)
+                    except TickerNotFound:
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "error": {
+                                    "code": "INVALID_TICKER",
+                                    "message": f"Unknown ticker: {t!r}",
+                                }
+                            },
+                        )
+                    if filings:
+                        save_to_db(filings, db_path)
+                    # Record coverage even when empty: the window IS now known
+                    # (the company simply had no Form 4s then), so don't refetch.
+                    record_coverage(db_path, t, lo, hi)
+                    fetches += 1
+            return fetches
+
+        # ── Recent-N (no date range) ────────────────────────────────
         missing = _tickers_missing_from_db(source, tickers)
         for t in missing:
             filings = parse_form4_for_ticker(t, count=count)
             if filings:
                 save_to_db(filings, db_path)
-        return
+            fetches += 1
+        return fetches
 
+    # ── No tickers: per-source bulk refresh if empty ────────────────
     if _db_has_any_rows(source):
-        return
+        return 0
     if source == "watchlist":
         results = parse_all_form4_from_watchlist(count=count)
         all_filings = []
@@ -109,6 +186,7 @@ def _lazy_load(source: str, tickers: list, count: int) -> None:
         all_filings = parse_all_from_rss()
     if all_filings:
         save_to_db(all_filings, db_path)
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +195,9 @@ def _lazy_load(source: str, tickers: list, count: int) -> None:
 
 @router.get("/api/trades")
 def get_trades(
+    request: Request,
     source: Annotated[str, Query(description="DB source: 'watchlist' or 'all'")] = "watchlist",
-    ticker: Optional[Union[str, List[str]]] = None,
+    ticker: Annotated[Optional[List[str]], Query(description="One or more tickers (repeat the param for multiple)")] = None,
     owner:  Optional[str] = None,
     code:   Optional[str] = None,
     acquired_or_disposed: Optional[str] = None,
@@ -128,7 +207,7 @@ def get_trades(
     limit:  Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     auto_refresh: bool = True,
-    count: Annotated[int, Query(ge=1, le=40, description="Filings per ticker to fetch on lazy-load")] = 5,
+    count: Annotated[int, Query(ge=1, le=100, description="Filings per ticker to fetch on lazy-load")] = 5,
 ):
     """Return insider trades with optional filters and pagination.
 
@@ -141,15 +220,14 @@ def get_trades(
       `source='watchlist'`).
     Pass `auto_refresh=False` for the original read-only behavior.
     """
-    if isinstance(ticker, str):
-        tickers = [ticker.upper()]
-    elif ticker:
-        tickers = [t.upper() for t in ticker]
-    else:
-        tickers = []
+    tickers = [t.upper() for t in ticker] if ticker else []
 
     if auto_refresh:
-        _lazy_load(source, tickers, count)
+        fetches = _lazy_load(source, tickers, count, date_from, date_to)
+        # Bill a cache-miss/backfill as a higher-credit event (plan 05 §3.3).
+        # The metering middleware reads request.state.extra_credits.
+        if fetches:
+            request.state.extra_credits = fetches * LAZY_FETCH_CREDITS
 
     conn = _connect(source)
 

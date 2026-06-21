@@ -66,6 +66,78 @@ def init_db(db_path: str):
     conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Coverage tracking (plan 05) — which historical windows have been backfilled
+# ---------------------------------------------------------------------------
+# Without this, "ticker has rows" is mistaken for "ticker's requested period is
+# cached", so historical windows (e.g. 2019) would be served incomplete and
+# never refetched. Coverage lives in the same DB file as the trades it describes.
+
+def init_coverage_table(db_path: str) -> None:
+    """Create the form4_coverage table if it doesn't already exist."""
+    ensure_parent_dir(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS form4_coverage (
+            ticker        TEXT NOT NULL,
+            covered_from  TEXT NOT NULL,
+            covered_to    TEXT NOT NULL,
+            recorded_at   TEXT,
+            PRIMARY KEY (ticker, covered_from, covered_to)
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+def record_coverage(db_path: str, ticker: str, covered_from: str, covered_to: str) -> None:
+    """Record that [covered_from, covered_to] has been backfilled for ticker."""
+    from datetime import datetime, timezone
+    init_coverage_table(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO form4_coverage (ticker, covered_from, covered_to, recorded_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (ticker.upper(), covered_from, covered_to,
+             datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_coverage(db_path: str, ticker: str) -> list[tuple[str, str]]:
+    """Return recorded coverage windows [(from, to), ...] for a ticker."""
+    try:
+        conn = sqlite3.connect(db_path)
+    except sqlite3.Error:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT covered_from, covered_to FROM form4_coverage WHERE ticker = ?",
+            (ticker.upper(),),
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+    except sqlite3.OperationalError:
+        return []  # table doesn't exist yet
+    finally:
+        conn.close()
+
+
+def is_covered(db_path: str, ticker: str, date_from: str, date_to: str) -> bool:
+    """True if a single recorded window fully encloses [date_from, date_to].
+
+    ISO date strings compare lexicographically, so string comparison is correct.
+    """
+    for cov_from, cov_to in get_coverage(db_path, ticker):
+        if cov_from <= date_from and cov_to >= date_to:
+            return True
+    return False
+
+
 def save_to_db(parsed_list, db_path: str):
     """
     Flatten parsed Form 4 data (owner x transaction) and insert into SQLite.

@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 from findata.sec.agents.conversational_cio import chat as cio_chat, reset_session as cio_reset
+from findata.server.billing import upstream_cost
 import uuid
-from fastapi import FastAPI, Query, HTTPException
 
 # ---------------------------------------------------------------------------
 # App
@@ -28,7 +28,7 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat_with_cio(req: ChatRequest):
+def chat_with_cio(req: ChatRequest, request: Request):
     """
     Talk to the conversational Chief Investment Officer agent.
 
@@ -44,6 +44,19 @@ def chat_with_cio(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CIO agent error: {e!r}")
+
+    # Track 0: a chat turn invokes the LLM (Google GenAI), a real per-call cost.
+    # Records an estimate; pass real token counts to record_chat_cost once an
+    # LLM callback exposes them for measured (not estimated) cost.
+    user = getattr(request.state, "user", None)
+    try:
+        upstream_cost.record_chat_cost(
+            user_id=user["user_id"] if user else None,
+            endpoint="/api/filings/chat",
+        )
+    except Exception:
+        pass  # never fail the request over cost accounting
+
     return ChatResponse(session_id=session_id, reply=reply)
 
 

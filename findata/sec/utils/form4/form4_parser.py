@@ -3,8 +3,10 @@ import requests
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 
+from findata.sec.const import SEC_USER_AGENT
+
 HEADERS = {
-    "User-Agent": "YourName your.email@example.com",  # Replace with real info
+    "User-Agent": SEC_USER_AGENT,
     "Accept-Encoding": "gzip, deflate",
 }
 

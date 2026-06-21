@@ -2,14 +2,17 @@ import requests
 from bs4 import BeautifulSoup
 import time
 
+from findata.sec.const import SEC_USER_AGENT
+
 def fetch_form4():
     # 1. SEC Atom Feed URL (type=4로 일차적으로 걸러서 가져옵니다)
     url = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&owner=include&count=100&output=atom"
-    
+
     # 2. 필수 헤더 설정 (SEC 규정: 이름과 이메일 필수)
-    # 반드시 본인의 실제 정보나 회사 이메일로 변경하세요.
+    # User-Agent는 findata.sec.const.SEC_USER_AGENT에서 가져옵니다
+    # (FINDATA_SEC_USER_AGENT 환경변수로 재정의 가능).
     headers = {
-        "User-Agent": "YourName your.email@example.com",
+        "User-Agent": SEC_USER_AGENT,
         "Accept-Encoding": "gzip, deflate",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
