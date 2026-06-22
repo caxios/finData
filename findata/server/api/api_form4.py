@@ -1,8 +1,7 @@
 import os
 import threading
 from datetime import datetime, timezone
-from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
-import sqlite3
+from findata.server.db.config import SEC_DB_DIR
 from typing import Optional, List, Annotated
 from fastapi import Query, HTTPException, APIRouter, Request
 from findata.sec.utils.form4.sec_form4_watchlist import (
@@ -20,6 +19,7 @@ from findata.server.db.form4_db import (
     is_covered,
     record_coverage,
 )
+from findata.server.db import form4_repo
 from findata.server.billing.costs import LAZY_FETCH_CREDITS
 
 
@@ -46,52 +46,6 @@ def _db_path(source: str) -> str:
             detail=f"Invalid source '{source}'. Use 'watchlist' or 'all'.",
         )
     return path
-
-
-def _connect(source: str) -> sqlite3.Connection:
-    """Open a connection with Row factory for dict-like access."""
-    path = _db_path(source)
-    ensure_parent_dir(path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _tickers_missing_from_db(source: str, tickers: list) -> list:
-    """Return the subset of `tickers` that have zero rows in the DB."""
-    if not tickers:
-        return []
-    try:
-        conn = _connect(source)
-        try:
-            present = {
-                row[0]
-                for row in conn.execute(
-                    f"SELECT DISTINCT ticker FROM insider_trades "
-                    f"WHERE ticker IN ({', '.join('?' * len(tickers))})",
-                    tickers,
-                ).fetchall()
-            }
-        finally:
-            conn.close()
-    except sqlite3.OperationalError:
-        # Table or file doesn't exist yet — everything is missing.
-        return list(tickers)
-    return [t for t in tickers if t not in present]
-
-
-def _db_has_any_rows(source: str) -> bool:
-    try:
-        conn = _connect(source)
-        try:
-            row = conn.execute(
-                "SELECT 1 FROM insider_trades LIMIT 1"
-            ).fetchone()
-            return row is not None
-        finally:
-            conn.close()
-    except sqlite3.OperationalError:
-        return False
 
 
 # Single-flight: serialize identical concurrent fetches so 10 users asking for
@@ -166,7 +120,7 @@ def _lazy_load(
             return fetches
 
         # ── Recent-N (no date range) ────────────────────────────────
-        missing = _tickers_missing_from_db(source, tickers)
+        missing = form4_repo.tickers_missing(db_path, tickers)
         for t in missing:
             filings = parse_form4_for_ticker(t, count=count)
             if filings:
@@ -175,7 +129,7 @@ def _lazy_load(
         return fetches
 
     # ── No tickers: per-source bulk refresh if empty ────────────────
-    if _db_has_any_rows(source):
+    if form4_repo.has_any_rows(db_path):
         return 0
     if source == "watchlist":
         results = parse_all_form4_from_watchlist(count=count)
@@ -229,59 +183,24 @@ def get_trades(
         if fetches:
             request.state.extra_credits = fetches * LAZY_FETCH_CREDITS
 
-    conn = _connect(source)
-
-    clauses = []
-    params  = []
-
-    if tickers:
-        placeholders = ", ".join("?" * len(tickers))
-        clauses.append(f"ticker IN ({placeholders})")
-        params.extend(tickers)
-    if owner:
-        clauses.append("owner_name LIKE ?")
-        params.append(f"%{owner}%")
-    if code:
-        clauses.append("transaction_code = ?")
-        params.append(code.upper())
-    if acquired_or_disposed:
-        clauses.append("acquired_or_disposed = ?")
-        params.append(acquired_or_disposed.upper())
-    if date_from:
-        clauses.append("transaction_date >= ?")
-        params.append(date_from)
-    if date_to:
-        clauses.append("transaction_date <= ?")
-        params.append(date_to)
-    if min_value is not None:
-        clauses.append("transaction_value >= ?")
-        params.append(min_value)
-
-    where_sql = " AND ".join(clauses) if clauses else "1=1"
-
-    # Total count (for pagination metadata)
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM insider_trades WHERE {where_sql}", params
-    ).fetchone()[0]
-
-    # Page of data
-    rows = conn.execute(
-        f"""
-        SELECT * FROM insider_trades
-        WHERE  {where_sql}
-        ORDER BY transaction_date DESC, id DESC
-        LIMIT ? OFFSET ?
-        """,
-        params + [limit, offset],
-    ).fetchall()
-
-    conn.close()
+    total, trades = form4_repo.query_trades(
+        _db_path(source),
+        tickers=tickers,
+        owner=owner,
+        code=code,
+        acquired_or_disposed=acquired_or_disposed,
+        date_from=date_from,
+        date_to=date_to,
+        min_value=min_value,
+        limit=limit,
+        offset=offset,
+    )
 
     return {
         "total":  total,
         "limit":  limit,
         "offset": offset,
-        "trades": [dict(r) for r in rows],
+        "trades": trades,
     }
 
 
@@ -291,15 +210,10 @@ def get_trades(
 @router.get("/api/trades/{trade_id}")
 def get_trade(trade_id: int, source: str = Query("watchlist")):
     """Return the full detail of a single trade by its row ID."""
-    conn = _connect(source)
-    row = conn.execute(
-        "SELECT * FROM insider_trades WHERE id = ?", (trade_id,)
-    ).fetchone()
-    conn.close()
-
+    row = form4_repo.get_trade(_db_path(source), trade_id)
     if not row:
         raise HTTPException(status_code=404, detail="Trade not found")
-    return dict(row)
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -308,34 +222,7 @@ def get_trade(trade_id: int, source: str = Query("watchlist")):
 @router.get("/api/summary")
 def get_summary(source: str = Query("watchlist")):
     """Aggregated overview per ticker (trade counts, values, insiders)."""
-    conn = _connect(source)
-
-    rows = conn.execute("""
-        SELECT
-            ticker,
-            COUNT(*)
-                AS total_trades,
-            SUM(CASE WHEN acquired_or_disposed = 'A' THEN 1 ELSE 0 END)
-                AS total_buys,
-            SUM(CASE WHEN acquired_or_disposed = 'D' THEN 1 ELSE 0 END)
-                AS total_sells,
-            SUM(CASE WHEN acquired_or_disposed = 'A'
-                      THEN COALESCE(transaction_value, 0) ELSE 0 END)
-                AS total_buy_value,
-            SUM(CASE WHEN acquired_or_disposed = 'D'
-                      THEN COALESCE(transaction_value, 0) ELSE 0 END)
-                AS total_sell_value,
-            MAX(transaction_date)
-                AS latest_trade_date,
-            COUNT(DISTINCT owner_name)
-                AS unique_insiders
-        FROM insider_trades
-        GROUP BY ticker
-        ORDER BY ticker
-    """).fetchall()
-
-    conn.close()
-    return {"summary": [dict(r) for r in rows]}
+    return {"summary": form4_repo.summary(_db_path(source))}
 
 
 # ---------------------------------------------------------------------------
@@ -358,115 +245,21 @@ def get_rankings(
     When `ticker` is provided, returns a single aggregate object for that
     ticker instead of the top-N per-side lists.
     """
-    conn = _connect(source)
-
-    where = ["ticker IS NOT NULL", "ticker <> ''"]
-    params: list = []
     if ticker:
-        where.append("ticker = ?")
-        params.append(ticker.upper())
-    if date_from:
-        where.append("transaction_date >= ?")
-        params.append(date_from)
-    if date_to:
-        where.append("transaction_date <= ?")
-        params.append(date_to)
-    where_sql = " AND ".join(where)
-
-    if ticker:
-        conn.close()
-        upper = ticker.upper()
-
-        agg = {
-            "ticker": upper,
-            "issuer_name": None,
-            "buy_value": 0.0,
-            "sell_value": 0.0,
-            "buy_count": 0,
-            "sell_count": 0,
-        }
         # Aggregate across BOTH watchlist and all DBs so the result matches the
-        # union used by /api/company-data/{ticker}. Trades are deduped on
-        # (source_url, owner_name, transaction_date, amount) — the same key as
-        # company_data._select_form4_rows.
-        seen: set[tuple] = set()
-        for src_path in (DB_PATHS["all"], DB_PATHS["watchlist"]):
-            if not os.path.exists(src_path):
-                continue
-            try:
-                src_conn = sqlite3.connect(src_path)
-                src_conn.row_factory = sqlite3.Row
-                rows = src_conn.execute(
-                    f"""
-                    SELECT issuer_name, transaction_code, transaction_value,
-                           source_url, owner_name, transaction_date, amount
-                      FROM insider_trades
-                     WHERE {where_sql}
-                    """,
-                    params,
-                ).fetchall()
-                src_conn.close()
-            except sqlite3.Error:
-                continue
+        # union used by /api/company-data/{ticker}.
+        return form4_repo.rankings_for_ticker(
+            [DB_PATHS["all"], DB_PATHS["watchlist"]],
+            ticker, date_from, date_to,
+        )
 
-            for r in rows:
-                key = (
-                    r["source_url"] or "",
-                    r["owner_name"] or "",
-                    r["transaction_date"] or "",
-                    r["amount"],
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                if agg["issuer_name"] is None and r["issuer_name"]:
-                    agg["issuer_name"] = r["issuer_name"]
-                value = r["transaction_value"] or 0
-                if r["transaction_code"] == "P":
-                    agg["buy_value"] += value
-                    agg["buy_count"] += 1
-                elif r["transaction_code"] == "S":
-                    agg["sell_value"] += value
-                    agg["sell_count"] += 1
-
-        agg["net_value"] = agg["buy_value"] - agg["sell_value"]
-        return agg
-
-    base_sql = f"""
-        SELECT
-            ticker,
-            MAX(issuer_name) AS issuer_name,
-            SUM(CASE WHEN transaction_code = 'P'
-                     THEN COALESCE(transaction_value, 0) ELSE 0 END) AS buy_value,
-            SUM(CASE WHEN transaction_code = 'S'
-                     THEN COALESCE(transaction_value, 0) ELSE 0 END) AS sell_value,
-            SUM(CASE WHEN transaction_code = 'P' THEN 1 ELSE 0 END) AS buy_count,
-            SUM(CASE WHEN transaction_code = 'S' THEN 1 ELSE 0 END) AS sell_count
-        FROM insider_trades
-        WHERE {where_sql}
-        GROUP BY ticker
-        HAVING buy_value > 0 OR sell_value > 0
-    """
-
-    top_buy = conn.execute(
-        f"SELECT *, (buy_value - sell_value) AS net_value "
-        f"FROM ({base_sql}) WHERE (buy_value - sell_value) > 0 "
-        f"ORDER BY net_value DESC LIMIT ?",
-        params + [n],
-    ).fetchall()
-
-    top_sell = conn.execute(
-        f"SELECT *, (buy_value - sell_value) AS net_value "
-        f"FROM ({base_sql}) WHERE (buy_value - sell_value) < 0 "
-        f"ORDER BY net_value ASC LIMIT ?",
-        params + [n],
-    ).fetchall()
-
-    conn.close()
+    top_buy, top_sell = form4_repo.top_rankings(
+        _db_path(source), n=n, date_from=date_from, date_to=date_to,
+    )
     return {
         "n": n,
-        "top_net_buying":  [dict(r) for r in top_buy],
-        "top_net_selling": [dict(r) for r in top_sell],
+        "top_net_buying":  top_buy,
+        "top_net_selling": top_sell,
     }
 
 

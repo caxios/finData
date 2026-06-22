@@ -54,3 +54,9 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["findata*"]
+
+[tool.setuptools.package-data]
+# Ship non-Python data files inside the wheel (e.g. the data universe config)
+# so a non-editable install (Docker image) has them.
+"findata.server.ingestion" = ["*.json"]
+"findata.dart" = ["*.json"]

@@ -21,6 +21,11 @@ except ImportError:
 _home_dir = Path.home()
 DATA_DIR = Path(os.getenv("FINDATA_DATA_DIR", _home_dir / ".findata"))
 
+# Storage backend selector (plan 07). When unset (default), the server uses
+# per-file SQLite under DATA_DIR. A postgres:// URL selects Postgres once the
+# backend is wired (cut-over deferred — see 07_storage_migration.md).
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 # ── SEC database directory ──────────────────────────────────────────
 SEC_DB_DIR = DATA_DIR / "sec_db"
 

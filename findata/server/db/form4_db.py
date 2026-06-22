@@ -1,6 +1,14 @@
 import sqlite3
 
 from findata.server.db.config import ensure_parent_dir
+from findata.server.db.engine import connect as _engine_connect
+from findata.server.db import dbutil
+
+# Unique key used for dedup (mirrors the UNIQUE constraint below). On SQLite the
+# insert becomes INSERT OR IGNORE; on Postgres, ON CONFLICT (these cols) DO NOTHING.
+_TRADE_CONFLICT_COLS = [
+    "source_url", "owner_name", "transaction_date", "security_title", "amount",
+]
 
 
 def _to_float(val):
@@ -147,8 +155,24 @@ def save_to_db(parsed_list, db_path: str):
         db_path:     Path to the SQLite database file.
     """
     init_db(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = _engine_connect(db_path)
     cursor = conn.cursor()
+
+    insert_sql = dbutil.dedup_insert(
+        """
+        INSERT INTO insider_trades (
+            source_url, document_type, period_of_report, ticker, rss_updated,
+            issuer_name, issuer_cik, issuer_symbol,
+            owner_name, is_director, is_officer, is_ten_pct_owner, is_other, officer_title,
+            row_type, security_category, security_title, transaction_date, transaction_code,
+            transaction_code_description,
+            amount, acquired_or_disposed, price_per_share, shares_owned_after,
+            ownership_form, nature_of_ownership,
+            trade_ratio_pct, transaction_value, market_value_after, market_cap
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        conflict_cols=_TRADE_CONFLICT_COLS,
+    )
 
     inserted = 0
     skipped = 0
@@ -204,18 +228,7 @@ def save_to_db(parsed_list, db_path: str):
                 )
 
                 try:
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO insider_trades (
-                            source_url, document_type, period_of_report, ticker, rss_updated,
-                            issuer_name, issuer_cik, issuer_symbol,
-                            owner_name, is_director, is_officer, is_ten_pct_owner, is_other, officer_title,
-                            row_type, security_category, security_title, transaction_date, transaction_code,
-                            transaction_code_description,
-                            amount, acquired_or_disposed, price_per_share, shares_owned_after,
-                            ownership_form, nature_of_ownership,
-                            trade_ratio_pct, transaction_value, market_value_after, market_cap
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, row)
+                    cursor.execute(insert_sql, row)
                     if cursor.rowcount > 0:
                         inserted += 1
                     else:

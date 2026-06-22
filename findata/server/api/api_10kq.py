@@ -13,7 +13,9 @@ from findata.server.company_data import (
 )
 from findata.sec.company_facts.company_specific_fin import get_company_facts
 from findata.server.db.company_facts_db import save_company_facts
-from playwright.sync_api import sync_playwright
+# NOTE: playwright is imported lazily inside generate_pdf() so the app (and its
+# container image) doesn't require Chromium unless PDF rendering is enabled.
+# See ENABLE_PDF_DOWNLOAD below and 08_deployment_and_infra.md §3.2 / Step 1.
 
 
 # ---------------------------------------------------------------------------
@@ -402,8 +404,24 @@ def get_filing_text(
 
 @router.get("/api/download-pdf")
 def generate_pdf(url: str):
+    # Disabled by default: Playwright/Chromium is heavy and not installed in the
+    # slim image. Enable with ENABLE_PDF_DOWNLOAD=1 on a host with the browser.
+    if os.getenv("ENABLE_PDF_DOWNLOAD", "0") != "1":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "code": "PDF_DISABLED",
+                    "message": (
+                        "PDF rendering is disabled on this server. "
+                        "Set ENABLE_PDF_DOWNLOAD=1 (requires Playwright + Chromium)."
+                    ),
+                }
+            },
+        )
+    from playwright.sync_api import sync_playwright  # lazy: only when enabled
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         # [핵심 해결책] SEC가 요구하는 규격의 명찰(User-Agent)을 달고 새 창을 엽니다.
         # [수정 포인트 1] 괄호와 기호를 모두 뺀 가장 안전하고 단순한 포맷
         sec_user_agent = "DK mrsimple@gmail.com"
