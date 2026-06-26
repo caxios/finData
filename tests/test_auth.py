@@ -9,7 +9,6 @@ Covers:
 - Plaintext key never stored in DB
 """
 
-import sqlite3
 import os
 import subprocess
 import sys
@@ -75,8 +74,8 @@ class TestAccountsDB:
         uid = create_user("hash@example.com", db_path=self.db_path)
         plaintext = create_api_key(uid, db_path=self.db_path)
 
-        # Scan all text columns for the raw key
-        conn = sqlite3.connect(self.db_path)
+        from findata.server.db.engine import connect
+        conn = connect()
         rows = conn.execute("SELECT key_prefix, key_hash FROM api_keys").fetchall()
         conn.close()
 

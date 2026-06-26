@@ -8,48 +8,9 @@ Covers:
   including endpoints that previously had no tests (summary, rankings, get_trade)
 """
 
-import sqlite3
-
 import pytest
 
 from findata.server.db import engine, dbutil, form4_repo, form4_db
-
-
-# =====================================================================
-# engine
-# =====================================================================
-
-class TestEngine:
-    def test_default_backend_is_sqlite(self, monkeypatch):
-        monkeypatch.setattr("findata.server.db.config.DATABASE_URL", None)
-        assert engine.get_backend() == "sqlite"
-
-    def test_postgres_url_detected(self, monkeypatch):
-        monkeypatch.setattr("findata.server.db.config.DATABASE_URL",
-                            "postgresql://u:p@host/db")
-        assert engine.get_backend() == "postgres"
-
-    def test_connect_sqlite_returns_row_conn(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("findata.server.db.config.DATABASE_URL", None)
-        conn = engine.connect(str(tmp_path / "x.db"))
-        try:
-            conn.execute("CREATE TABLE t (a TEXT)")
-            conn.execute("INSERT INTO t VALUES ('hi')")
-            row = conn.execute("SELECT a FROM t").fetchone()
-            assert row["a"] == "hi"  # Row factory → dict-like access
-        finally:
-            conn.close()
-
-    def test_connect_requires_db_path_on_sqlite(self, monkeypatch):
-        monkeypatch.setattr("findata.server.db.config.DATABASE_URL", None)
-        with pytest.raises(ValueError):
-            engine.connect(None)
-
-    def test_postgres_not_wired_raises(self, monkeypatch):
-        monkeypatch.setattr("findata.server.db.config.DATABASE_URL",
-                            "postgresql://u:p@host/db")
-        with pytest.raises(NotImplementedError):
-            engine.connect("ignored")
 
 
 # =====================================================================
@@ -57,12 +18,6 @@ class TestEngine:
 # =====================================================================
 
 class TestDbutil:
-    def test_sqlite_uses_insert_or_ignore(self):
-        out = dbutil.dedup_insert("INSERT INTO t (a) VALUES (?)",
-                                  conflict_cols=["a"], backend="sqlite")
-        assert out.startswith("INSERT OR IGNORE INTO t")
-        assert "ON CONFLICT" not in out
-
     def test_postgres_uses_on_conflict_with_target(self):
         out = dbutil.dedup_insert("INSERT INTO t (a, b) VALUES (?, ?)",
                                   conflict_cols=["a", "b"], backend="postgres")
