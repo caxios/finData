@@ -10,7 +10,9 @@ One DB file per form so each pipeline is independently versionable:
 
 import json
 import os
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 from typing import Any
 
 from findata.server.db.config import SEC_DB_DIR, ensure_parent_dir
@@ -28,7 +30,7 @@ DB_PATHS = {
 
 # Common metadata columns shared across every per-form table.
 _META = """
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                SERIAL PRIMARY KEY,
     cik               TEXT,
     accession_number  TEXT UNIQUE,
     form_type         TEXT,
@@ -87,8 +89,8 @@ def _schema_key(form: str) -> str:
 def _connect(form: str) -> sqlite3.Connection:
     db_path = DB_PATHS[form]
     ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect(db_path)
+    
     conn.executescript(_SCHEMAS[_schema_key(form)])
     return conn
 
@@ -109,18 +111,18 @@ def save_filing(form: str, parsed: dict[str, Any]) -> bool:
         if form == "8-K":
             sql = (f"INSERT OR IGNORE INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, items_json) "
-                   f"VALUES (?, ?, ?, ?, ?, ?, ?)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s)")
             extras = (json.dumps(parsed.get("items", []), ensure_ascii=False),)
         elif form == "S-4":
             sql = (f"INSERT OR IGNORE INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, sections_json) "
-                   f"VALUES (?, ?, ?, ?, ?, ?, ?)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s)")
             extras = (json.dumps(parsed.get("sections", {}), ensure_ascii=False),)
         elif form in ("SC 13D", "SC 13G"):
             sql = (f"INSERT OR IGNORE INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, "
                    f" beneficial_owner, shares_owned, percent_owned) "
-                   f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)")
             extras = (
                 parsed.get("beneficial_owner"),
                 parsed.get("shares_owned"),
@@ -130,7 +132,7 @@ def save_filing(form: str, parsed: dict[str, Any]) -> bool:
             sql = (f"INSERT OR IGNORE INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, "
                    f" issuer_name, shares_to_be_sold, aggregate_value, broker, sale_date) "
-                   f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
             extras = (
                 parsed.get("issuer_name"),
                 parsed.get("shares_to_be_sold"),
@@ -154,7 +156,7 @@ def select_filing(form: str, accession_number: str) -> dict[str, Any] | None:
     conn = _connect(form)
     try:
         row = conn.execute(
-            f"SELECT * FROM {table} WHERE accession_number = ?",
+            f"SELECT * FROM {table} WHERE accession_number = %s",
             (accession_number,),
         ).fetchone()
     finally:

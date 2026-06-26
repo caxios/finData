@@ -25,7 +25,7 @@ from findata.server.billing.upstream_cost import ensure_upstream_schema
 from findata.server.middleware.metering import MeteringMiddleware
 from findata.server.middleware.ratelimit import RateLimitMiddleware
 from findata.server.billing.plans import get_plan
-
+from findata.server.errors import register_error_handlers
 
 # ---------------------------------------------------------------------------
 # App
@@ -39,6 +39,7 @@ app = FastAPI(
     description="Commercial API for SEC EDGAR and OpenDART financial data.",
     version="0.2.0",
 )
+register_error_handlers(app)
 
 
 @app.on_event("startup")
@@ -126,7 +127,7 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/api/health/poller", tags=["System"])
+@app.get("/v1/api/health/poller", tags=["System"])
 def poller_health():
     """Form 4 poller status (last run, counts, failures) — no auth required."""
     from findata.server.ingestion.form4_poller import get_poller_status
@@ -149,15 +150,15 @@ _auth_deps = [
     Depends(circuit_breaker),
 ]
 
-app.include_router(api_form4.router, dependencies=_auth_deps)
-app.include_router(api_earnigscall.router, dependencies=_auth_deps)
-app.include_router(api_10kq.router, dependencies=_auth_deps)
-app.include_router(api_cio_chat.router, dependencies=_auth_deps)
+app.include_router(api_form4.router, prefix="/v1", dependencies=_auth_deps)
+app.include_router(api_earnigscall.router, prefix="/v1", dependencies=_auth_deps)
+app.include_router(api_10kq.router, prefix="/v1", dependencies=_auth_deps)
+app.include_router(api_cio_chat.router, prefix="/v1", dependencies=_auth_deps)
 
 
 # ── Usage endpoint (authenticated, shows caller's own usage) ────────
 
-@app.get("/api/usage", tags=["System"], dependencies=[Depends(require_api_key)])
+@app.get("/v1/api/usage", tags=["System"], dependencies=[Depends(require_api_key)])
 def get_usage(request: Request):
     """Return the caller's credit usage for the current billing period."""
     user = request.state.user
@@ -170,7 +171,7 @@ def get_usage(request: Request):
 
 # ── Admin: Track 0 upstream cost summary (owner only) ───────────────
 
-@app.get("/api/admin/upstream-costs", tags=["System"], dependencies=[Depends(require_api_key)])
+@app.get("/v1/api/admin/upstream-costs", tags=["System"], dependencies=[Depends(require_api_key)])
 def get_upstream_costs(request: Request):
     """Owner-only: per-endpoint upstream cost + avg $/call for the period.
 

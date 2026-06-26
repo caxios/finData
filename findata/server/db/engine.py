@@ -1,57 +1,59 @@
 """
-Database engine / connection factory (plan 07 §3.2, Step 1).
+Database engine / connection factory (PostgreSQL).
 
-The single seam through which DB connections are created, so swapping SQLite
-for Postgres later is localized here instead of scattered across routers.
-
-Today only SQLite is wired (the MVP backend). When ``DATABASE_URL`` points at
-Postgres, ``connect`` raises a clear ``NotImplementedError`` — the Postgres
-cut-over (schema, backfill, driver) is intentionally deferred to a later pass
-of plan 07. Unset ``DATABASE_URL`` to use SQLite.
+Swapped from SQLite to PostgreSQL via psycopg2.
 """
 
 from __future__ import annotations
 
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 
 from findata.server.db import config as _config
 
+# Add custom exception mappings to match what the codebase expects
+class OperationalError(psycopg2.OperationalError):
+    pass
+class Error(psycopg2.Error):
+    pass
 
 def get_backend() -> str:
-    """Return the active storage backend: 'sqlite' (default) or 'postgres'."""
+    """Return the active storage backend."""
+    return "postgres"
+
+def connect(db_path: str | None = None):
+    """Open a DB connection through the configured backend.
+    
+    Ignores db_path since Postgres uses DATABASE_URL.
+    Returns a connection that produces dict-like rows.
+    """
     url = _config.DATABASE_URL
     if not url:
-        return "sqlite"
-    low = url.lower()
-    if low.startswith(("postgres://", "postgresql://")):
-        return "postgres"
-    if low.startswith("sqlite"):
-        return "sqlite"
-    # Unknown scheme → be safe and treat as SQLite (the only wired backend).
-    return "sqlite"
-
-
-def connect(db_path: str | None = None) -> sqlite3.Connection:
-    """Open a DB connection through the configured backend.
-
-    For SQLite, ``db_path`` selects the file (one file per logical DB today),
-    the parent directory is created, and ``row_factory`` is set to ``Row`` so
-    callers get dict-like rows.
-
-    Raises:
-        NotImplementedError: if a Postgres backend is configured (deferred).
-        ValueError:          if SQLite is selected but ``db_path`` is missing.
-    """
-    backend = get_backend()
-    if backend == "postgres":
-        raise NotImplementedError(
-            "Postgres backend is not wired yet (plan 07 cut-over deferred). "
-            "Unset DATABASE_URL to use SQLite."
-        )
-
-    if db_path is None:
-        raise ValueError("db_path is required for the SQLite backend")
-    _config.ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+        raise ValueError("DATABASE_URL is not set. Required for PostgreSQL backend.")
+        
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.DictCursor)
+    conn.autocommit = True
+    
+    # Simple wrapper to match sqlite3 semantics (execute on conn directly)
+    class ConnWrapper:
+        def __init__(self, c):
+            self._c = c
+        def execute(self, sql, params=()):
+            cur = self._c.cursor()
+            cur.execute(sql, params)
+            return cur
+        def executescript(self, sql):
+            cur = self._c.cursor()
+            cur.execute(sql)
+            return cur
+        def commit(self):
+            self._c.commit()
+        def close(self):
+            self._c.close()
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.close()
+            
+    return ConnWrapper(conn)

@@ -1,4 +1,6 @@
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 
 from findata.server.db.config import ensure_parent_dir
 from findata.server.db.engine import connect as _engine_connect
@@ -24,10 +26,10 @@ def _to_float(val):
 def init_db(db_path: str):
     """Create the insider_trades table if it doesn't already exist."""
     ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS insider_trades (
-            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                   SERIAL PRIMARY KEY,
 
             -- Filing-level
             source_url           TEXT,
@@ -84,7 +86,7 @@ def init_db(db_path: str):
 def init_coverage_table(db_path: str) -> None:
     """Create the form4_coverage table if it doesn't already exist."""
     ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS form4_coverage (
             ticker        TEXT NOT NULL,
@@ -102,12 +104,12 @@ def record_coverage(db_path: str, ticker: str, covered_from: str, covered_to: st
     """Record that [covered_from, covered_to] has been backfilled for ticker."""
     from datetime import datetime, timezone
     init_coverage_table(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     try:
         conn.execute(
             """
             INSERT OR IGNORE INTO form4_coverage (ticker, covered_from, covered_to, recorded_at)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             """,
             (ticker.upper(), covered_from, covered_to,
              datetime.now(timezone.utc).isoformat()),
@@ -120,16 +122,16 @@ def record_coverage(db_path: str, ticker: str, covered_from: str, covered_to: st
 def get_coverage(db_path: str, ticker: str) -> list[tuple[str, str]]:
     """Return recorded coverage windows [(from, to), ...] for a ticker."""
     try:
-        conn = sqlite3.connect(db_path)
-    except sqlite3.Error:
+        conn = connect(db_path)
+    except psycopg2.Error:
         return []
     try:
         rows = conn.execute(
-            "SELECT covered_from, covered_to FROM form4_coverage WHERE ticker = ?",
+            "SELECT covered_from, covered_to FROM form4_coverage WHERE ticker = %s",
             (ticker.upper(),),
         ).fetchall()
         return [(r[0], r[1]) for r in rows]
-    except sqlite3.OperationalError:
+    except psycopg2.OperationalError:
         return []  # table doesn't exist yet
     finally:
         conn.close()
@@ -169,7 +171,7 @@ def save_to_db(parsed_list, db_path: str):
             amount, acquired_or_disposed, price_per_share, shares_owned_after,
             ownership_form, nature_of_ownership,
             trade_ratio_pct, transaction_value, market_value_after, market_cap
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         conflict_cols=_TRADE_CONFLICT_COLS,
     )
@@ -233,7 +235,7 @@ def save_to_db(parsed_list, db_path: str):
                         inserted += 1
                     else:
                         skipped += 1
-                except sqlite3.Error as e:
+                except psycopg2.Error as e:
                     print(f"[WARN] DB insert error: {e}")
                     skipped += 1
 

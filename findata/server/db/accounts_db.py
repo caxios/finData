@@ -8,7 +8,9 @@ hashes are persisted.
 
 import hashlib
 import secrets
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 import string
 from datetime import datetime, timezone
 from typing import Optional
@@ -44,14 +46,14 @@ def _now_iso() -> str:
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          SERIAL PRIMARY KEY,
     email       TEXT    UNIQUE NOT NULL,
     plan        TEXT    NOT NULL DEFAULT 'free',  -- 'owner' | 'free' | 'pro' | ...
     created_at  TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS api_keys (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    id           SERIAL PRIMARY KEY,
     user_id      INTEGER NOT NULL REFERENCES users(id),
     key_prefix   TEXT    NOT NULL,         -- e.g. 'fd_live_a1b2' (display only)
     key_hash     TEXT    NOT NULL UNIQUE,  -- SHA-256 of the full key
@@ -69,7 +71,7 @@ def ensure_accounts_schema(db_path: str | None = None) -> None:
     """Create the users and api_keys tables if they don't exist."""
     path = _db_path(db_path)
     _config.ensure_parent_dir(path)
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     conn.executescript(_SCHEMA_SQL)
     conn.close()
 
@@ -88,15 +90,15 @@ def create_user(
     """
     path = _db_path(db_path)
     ensure_accounts_schema(path)
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO users (email, plan, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO users (email, plan, created_at) VALUES (%s, %s, %s) ON CONFLICT (email) DO NOTHING",
             (email, plan, _now_iso()),
         )
         conn.commit()
         row = conn.execute(
-            "SELECT id FROM users WHERE email = ?", (email,)
+            "SELECT id FROM users WHERE email = %s", (email,)
         ).fetchone()
         return row[0]
     finally:
@@ -133,12 +135,12 @@ def create_api_key(
     key_hash = _hash_key(full_key)
     display_prefix = full_key[:12]  # e.g. 'fd_live_a1b2'
 
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         conn.execute(
             """
             INSERT INTO api_keys (user_id, key_prefix, key_hash, label, active, created_at)
-            VALUES (?, ?, ?, ?, 1, ?)
+            VALUES (%s, %s, %s, %s, 1, %s)
             """,
             (user_id, display_prefix, key_hash, label, _now_iso()),
         )
@@ -161,8 +163,8 @@ def get_user_by_key(
     path = _db_path(db_path)
     key_hash = _hash_key(raw_key)
 
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = connect(path)
+    
     try:
         row = conn.execute(
             """
@@ -178,7 +180,7 @@ def get_user_by_key(
                 u.plan
             FROM api_keys k
             JOIN users u ON u.id = k.user_id
-            WHERE k.key_hash = ?
+            WHERE k.key_hash = %s
             """,
             (key_hash,),
         ).fetchone()
@@ -203,10 +205,10 @@ def get_user_by_key(
 def update_last_used(key_id: int, *, db_path: str | None = None) -> None:
     """Update the last_used_at timestamp for a key."""
     path = _db_path(db_path)
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         conn.execute(
-            "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
+            "UPDATE api_keys SET last_used_at = %s WHERE id = %s",
             (_now_iso(), key_id),
         )
         conn.commit()
@@ -217,10 +219,10 @@ def update_last_used(key_id: int, *, db_path: str | None = None) -> None:
 def deactivate_key(key_id: int, *, db_path: str | None = None) -> None:
     """Deactivate an API key (soft-delete)."""
     path = _db_path(db_path)
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         conn.execute(
-            "UPDATE api_keys SET active = 0 WHERE id = ?",
+            "UPDATE api_keys SET active = 0 WHERE id = %s",
             (key_id,),
         )
         conn.commit()
@@ -233,14 +235,14 @@ def list_keys_for_user(
 ) -> list[dict]:
     """Return all API keys (metadata only) for a user."""
     path = _db_path(db_path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = connect(path)
+    
     try:
         rows = conn.execute(
             """
             SELECT id, key_prefix, label, active, created_at, last_used_at
             FROM api_keys
-            WHERE user_id = ?
+            WHERE user_id = %s
             ORDER BY created_at DESC
             """,
             (user_id,),

@@ -1,4 +1,6 @@
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 
 from findata.server.db.config import ensure_parent_dir
 
@@ -6,7 +8,7 @@ from findata.server.db.config import ensure_parent_dir
 def init_db(db_path: str):
     """Create companies + company_facts tables if they don't exist."""
     ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS companies (
             cik         TEXT PRIMARY KEY,
@@ -16,7 +18,7 @@ def init_db(db_path: str):
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS company_facts (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            id           SERIAL PRIMARY KEY,
             cik          TEXT NOT NULL,
             taxonomy     TEXT NOT NULL,
             concept      TEXT NOT NULL,
@@ -71,11 +73,11 @@ def save_company_facts(facts_data, db_path: str, ticker: str = None):
                         obs.get("form"), obs.get("filed"), obs.get("frame"),
                     ))
 
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT OR REPLACE INTO companies (cik, ticker, entity_name) VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO companies (cik, ticker, entity_name) VALUES (%s, %s, %s)",
         (cik, ticker, entity_name),
     )
 
@@ -85,7 +87,7 @@ def save_company_facts(facts_data, db_path: str, ticker: str = None):
             cik, taxonomy, concept, label, unit,
             period_start, period_end, val,
             accn, fy, fp, form, filed, frame
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, rows)
     conn.commit()
     inserted = conn.total_changes - before - 1  # minus the companies upsert

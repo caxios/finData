@@ -1,33 +1,29 @@
-# findata — single image for both the API and the background worker.
-# The role is selected by the container command (see CMD / docs):
-#   API    : uvicorn findata.server.app:app --host 0.0.0.0 --port 8000   (default)
-#   Worker : python -m findata.server.worker
-#
-# Playwright/Chromium is intentionally NOT installed — /api/download-pdf is
-# gated off by default (ENABLE_PDF_DOWNLOAD). To enable it, add a Playwright
-# base image / `playwright install --with-deps chromium` and set the env flag.
+# Use an official Python runtime as a parent image
+FROM python:3.10-slim
 
-FROM python:3.11-slim AS base
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    FINDATA_DATA_DIR=/data
-
+# Set work directory
 WORKDIR /app
 
-# Project metadata + source (only what the package needs; see .dockerignore).
+# Install system dependencies required for building psycopg2 and other packages
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files
 COPY pyproject.toml README.md ./
-COPY findata ./findata
+COPY findata/ ./findata/
 
-# Install the package with the server + DART extras (no editable, no ML/requirements.txt).
-RUN pip install ".[server,dart]"
+# Install the package with all optional dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir ".[all]"
 
-# Persistent data dir (mount a volume / EFS in production).
-RUN mkdir -p /data
-VOLUME ["/data"]
-
+# Expose the port the app runs on
 EXPOSE 8000
 
-# Default role: API. Override the command for the worker role.
+# Run the FastAPI server via Uvicorn
 CMD ["uvicorn", "findata.server.app:app", "--host", "0.0.0.0", "--port", "8000"]

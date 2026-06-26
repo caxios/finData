@@ -5,7 +5,9 @@ Tables live in the same ``accounts.db`` file alongside users/api_keys.
 Uses WAL mode and atomic UPSERTs for concurrency safety.
 """
 
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, timezone
 
 from findata.server.db import config as _config
@@ -28,7 +30,7 @@ def _current_period() -> str:
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS usage_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          SERIAL PRIMARY KEY,
     user_id     INTEGER NOT NULL,
     endpoint    TEXT    NOT NULL,
     credits     INTEGER NOT NULL,
@@ -52,8 +54,8 @@ def ensure_usage_schema(db_path: str | None = None) -> None:
     """Create usage tables if they don't exist.  Enables WAL mode."""
     path = db_path or _db_path()
     _config.ensure_parent_dir(path)
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = connect(path)
+    conn.execute("SELECT 1")
     conn.executescript(_SCHEMA_SQL)
     conn.close()
 
@@ -78,21 +80,21 @@ def record_usage(
     ts = _now_iso()
     period = _current_period()
 
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         conn.execute("BEGIN")
         conn.execute(
             """
             INSERT INTO usage_events (user_id, endpoint, credits, status_code, ts)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (user_id, endpoint, credits, status_code, ts),
         )
         conn.execute(
             """
             INSERT INTO usage_rollup (user_id, period, credits)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, period)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, period)
             DO UPDATE SET credits = credits + excluded.credits
             """,
             (user_id, period, credits),
@@ -122,10 +124,10 @@ def get_month_credits(
     ensure_usage_schema(path)
     period = period or _current_period()
 
-    conn = sqlite3.connect(path)
+    conn = connect(path)
     try:
         row = conn.execute(
-            "SELECT credits FROM usage_rollup WHERE user_id = ? AND period = ?",
+            "SELECT credits FROM usage_rollup WHERE user_id = %s AND period = %s",
             (user_id, period),
         ).fetchone()
         return row[0] if row else 0
@@ -143,8 +145,8 @@ def get_usage_summary(
     ensure_usage_schema(path)
     period = _current_period()
 
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
+    conn = connect(path)
+    
     try:
         credits_used = get_month_credits(user_id, period, db_path=path)
 
@@ -153,7 +155,7 @@ def get_usage_summary(
             """
             SELECT endpoint, SUM(credits) AS total_credits, COUNT(*) AS call_count
             FROM usage_events
-            WHERE user_id = ? AND ts LIKE ?
+            WHERE user_id = %s AND ts LIKE %s
             GROUP BY endpoint
             ORDER BY total_credits DESC
             LIMIT 20

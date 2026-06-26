@@ -11,7 +11,9 @@ identical on SQLite.
 from __future__ import annotations
 
 import os
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 from typing import Any
 
 from findata.server.db.engine import connect
@@ -30,13 +32,13 @@ def tickers_missing(db_path: str, tickers: list[str]) -> list[str]:
                 row[0]
                 for row in conn.execute(
                     f"SELECT DISTINCT ticker FROM insider_trades "
-                    f"WHERE ticker IN ({', '.join('?' * len(tickers))})",
+                    f"WHERE ticker IN ({', '.join('%s' * len(tickers))})",
                     tickers,
                 ).fetchall()
             }
         finally:
             conn.close()
-    except sqlite3.OperationalError:
+    except psycopg2.OperationalError:
         # Table or file doesn't exist yet — everything is missing.
         return list(tickers)
     return [t for t in tickers if t not in present]
@@ -51,7 +53,7 @@ def has_any_rows(db_path: str) -> bool:
             return row is not None
         finally:
             conn.close()
-    except sqlite3.OperationalError:
+    except psycopg2.OperationalError:
         return False
 
 
@@ -75,26 +77,26 @@ def query_trades(
     params: list[Any] = []
 
     if tickers:
-        placeholders = ", ".join("?" * len(tickers))
+        placeholders = ", ".join("%s" * len(tickers))
         clauses.append(f"ticker IN ({placeholders})")
         params.extend(tickers)
     if owner:
-        clauses.append("owner_name LIKE ?")
+        clauses.append("owner_name LIKE %s")
         params.append(f"%{owner}%")
     if code:
-        clauses.append("transaction_code = ?")
+        clauses.append("transaction_code = %s")
         params.append(code.upper())
     if acquired_or_disposed:
-        clauses.append("acquired_or_disposed = ?")
+        clauses.append("acquired_or_disposed = %s")
         params.append(acquired_or_disposed.upper())
     if date_from:
-        clauses.append("transaction_date >= ?")
+        clauses.append("transaction_date >= %s")
         params.append(date_from)
     if date_to:
-        clauses.append("transaction_date <= ?")
+        clauses.append("transaction_date <= %s")
         params.append(date_to)
     if min_value is not None:
-        clauses.append("transaction_value >= ?")
+        clauses.append("transaction_value >= %s")
         params.append(min_value)
 
     where_sql = " AND ".join(clauses) if clauses else "1=1"
@@ -110,7 +112,7 @@ def query_trades(
             SELECT * FROM insider_trades
             WHERE  {where_sql}
             ORDER BY transaction_date DESC, id DESC
-            LIMIT ? OFFSET ?
+            LIMIT %s OFFSET %s
             """,
             params + [limit, offset],
         ).fetchall()
@@ -125,7 +127,7 @@ def get_trade(db_path: str, trade_id: int) -> dict[str, Any] | None:
     conn = connect(db_path)
     try:
         row = conn.execute(
-            "SELECT * FROM insider_trades WHERE id = ?", (trade_id,)
+            "SELECT * FROM insider_trades WHERE id = %s", (trade_id,)
         ).fetchone()
     finally:
         conn.close()
@@ -171,13 +173,13 @@ def _rankings_where(ticker: str | None, date_from: str | None,
     where = ["ticker IS NOT NULL", "ticker <> ''"]
     params: list[Any] = []
     if ticker:
-        where.append("ticker = ?")
+        where.append("ticker = %s")
         params.append(ticker.upper())
     if date_from:
-        where.append("transaction_date >= ?")
+        where.append("transaction_date >= %s")
         params.append(date_from)
     if date_to:
-        where.append("transaction_date <= ?")
+        where.append("transaction_date <= %s")
         params.append(date_to)
     return " AND ".join(where), params
 
@@ -219,7 +221,7 @@ def rankings_for_ticker(
                 params,
             ).fetchall()
             src_conn.close()
-        except sqlite3.Error:
+        except psycopg2.Error:
             continue
 
         for r in rows:
@@ -276,14 +278,14 @@ def top_rankings(
         top_buy = conn.execute(
             f"SELECT *, (buy_value - sell_value) AS net_value "
             f"FROM ({base_sql}) WHERE (buy_value - sell_value) > 0 "
-            f"ORDER BY net_value DESC LIMIT ?",
+            f"ORDER BY net_value DESC LIMIT %s",
             params + [n],
         ).fetchall()
 
         top_sell = conn.execute(
             f"SELECT *, (buy_value - sell_value) AS net_value "
             f"FROM ({base_sql}) WHERE (buy_value - sell_value) < 0 "
-            f"ORDER BY net_value ASC LIMIT ?",
+            f"ORDER BY net_value ASC LIMIT %s",
             params + [n],
         ).fetchall()
     finally:

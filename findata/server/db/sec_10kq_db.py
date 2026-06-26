@@ -9,7 +9,9 @@ Two tables:
 """
 
 import json
-import sqlite3
+from findata.server.db.engine import connect
+import psycopg2
+import psycopg2.extras
 
 from findata.server.db.config import ensure_parent_dir
 
@@ -17,11 +19,11 @@ from findata.server.db.config import ensure_parent_dir
 def init_db(db_path: str):
     """Create the tables if they don't exist."""
     ensure_parent_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS filing_sections (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                  SERIAL PRIMARY KEY,
 
             -- Filing metadata
             cik                 TEXT,
@@ -47,7 +49,7 @@ def init_db(db_path: str):
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS filing_notes (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            id                  SERIAL PRIMARY KEY,
 
             -- FK to filing
             accession_number    TEXT NOT NULL,
@@ -77,7 +79,7 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
         True if the filing was inserted, False if skipped (duplicate).
     """
     init_db(db_path)
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     cursor = conn.cursor()
 
     sections = parsed_filing.get("sections") or {}
@@ -90,7 +92,7 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
                 cik, company_name, form_type, filing_date, accession_number,
                 index_url, document_url, parse_method,
                 business, risk_factors, mda
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             parsed_filing.get("cik", ""),
             parsed_filing.get("title", ""),
@@ -109,7 +111,7 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
             conn.close()
             return False  # duplicate
 
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         print(f"  [WARN] DB insert error (filing_sections): {e}")
         conn.close()
         return False
@@ -122,9 +124,9 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
                 cursor.execute("""
                     INSERT OR IGNORE INTO filing_notes (
                         accession_number, note_key, note_text
-                    ) VALUES (?, ?, ?)
+                    ) VALUES (%s, %s, %s)
                 """, (acc, note_key, note_text))
-            except sqlite3.Error as e:
+            except psycopg2.Error as e:
                 print(f"  [WARN] DB insert error (filing_notes): {e}")
 
     conn.commit()
@@ -159,7 +161,7 @@ def save_batch(parsed_filings: list[dict], db_path: str) -> tuple[int, int]:
 def get_filing_count(db_path: str) -> int:
     """Return the total number of filings stored."""
     try:
-        conn = sqlite3.connect(db_path)
+        conn = connect(db_path)
         count = conn.execute("SELECT COUNT(*) FROM filing_sections").fetchone()[0]
         conn.close()
         return count
@@ -170,10 +172,10 @@ def get_filing_count(db_path: str) -> int:
 def get_filings_by_cik(cik: str, db_path: str) -> list[dict]:
     """Retrieve all stored filings for a given CIK."""
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = connect(db_path)
+        
         rows = conn.execute(
-            "SELECT * FROM filing_sections WHERE cik = ? ORDER BY filing_date DESC",
+            "SELECT * FROM filing_sections WHERE cik = %s ORDER BY filing_date DESC",
             (cik,)
         ).fetchall()
         conn.close()
@@ -185,10 +187,10 @@ def get_filings_by_cik(cik: str, db_path: str) -> list[dict]:
 def get_notes_for_filing(accession_number: str, db_path: str) -> list[dict]:
     """Retrieve all crucial notes for a given filing."""
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = connect(db_path)
+        
         rows = conn.execute(
-            "SELECT * FROM filing_notes WHERE accession_number = ?",
+            "SELECT * FROM filing_notes WHERE accession_number = %s",
             (accession_number,)
         ).fetchall()
         conn.close()
