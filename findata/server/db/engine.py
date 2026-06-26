@@ -49,6 +49,10 @@ def connect(db_path: str | None = None):
             return cur
         def commit(self):
             self._c.commit()
+        def rollback(self):
+            self._c.rollback()
+        def cursor(self):
+            return self._c.cursor()
         def close(self):
             self._c.close()
         def __enter__(self):

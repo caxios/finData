@@ -32,7 +32,7 @@ def tickers_missing(db_path: str, tickers: list[str]) -> list[str]:
                 row[0]
                 for row in conn.execute(
                     f"SELECT DISTINCT ticker FROM insider_trades "
-                    f"WHERE ticker IN ({', '.join('%s' * len(tickers))})",
+                    f"WHERE ticker IN ({', '.join(['%s'] * len(tickers))})",
                     tickers,
                 ).fetchall()
             }
@@ -77,7 +77,7 @@ def query_trades(
     params: list[Any] = []
 
     if tickers:
-        placeholders = ", ".join("%s" * len(tickers))
+        placeholders = ", ".join(["%s"] * len(tickers))
         clauses.append(f"ticker IN ({placeholders})")
         params.extend(tickers)
     if owner:
