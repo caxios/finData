@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o StrictHostKeyChecking=no -i findata-key.pem ubuntu@3.107.112.100 \"sudo journalctl -u findata-api -n 80 --no-pager\")",
+      "Bash(ssh -o StrictHostKeyChecking=no -i findata-key.pem ubuntu@3.107.112.100 \"ls -la ~/findata-api/ 2>/dev/null | head -30; echo '---VENV---'; ls ~/findata-api/.venv/bin/ 2>/dev/null | head -20; echo '---PORT80---'; sudo ss -tlnp | grep :80; echo '---SERVICE---'; sudo systemctl status findata-api --no-pager | head -20\")",
+      "Bash(ssh -o StrictHostKeyChecking=no -i findata-key.pem ubuntu@3.107.112.100 \"sudo docker ps; echo '---LOGS---'; sudo docker ps -q | head -1 | xargs -I {} sudo docker logs --tail 60 {}\")",
+      "Bash(ssh -o StrictHostKeyChecking=no -i findata-key.pem ubuntu@3.107.112.100 \"cat ~/findata-api/.env; echo '---DNS TEST---'; nslookup findata-db.c5kmquuaooy7.ap-southeast-2.rds.amazonaws.com 2>&1 | tail -10; echo '---AWS CLI---'; which aws\")"
+    ]
+  }
+}
