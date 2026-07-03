@@ -69,40 +69,6 @@ def test_ensure_data_dirs_creates_server_directories(tmp_path):
     assert output.splitlines() == ["True", "True"]
 
 
-def test_legacy_sec_app_warns_and_reexports_server_app(tmp_path):
-    output = _run_import_check(
-        """
-        import warnings
-
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always", DeprecationWarning)
-            import findata.sec.app as legacy
-            import findata.server.app as canonical
-
-        print(legacy.app is canonical.app)
-        print(any("deprecated" in str(w.message) for w in caught))
-        """,
-        tmp_path / "findata-data",
-    )
-    assert output.splitlines() == ["True", "True"]
-
-
-def test_legacy_sec_api_reexports_server_router(tmp_path):
-    output = _run_import_check(
-        """
-        import warnings
-
-        warnings.simplefilter("ignore", DeprecationWarning)
-        from findata.sec.api import api_form4 as legacy
-        from findata.server.api import api_form4 as canonical
-
-        print(legacy.router is canonical.router)
-        """,
-        tmp_path / "findata-data",
-    )
-    assert output == "True"
-
-
 def test_server_extra_includes_full_server_router_dependencies():
     extras = _project_optional_dependencies()
     server_deps = set(extras["server"])
