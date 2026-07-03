@@ -88,11 +88,12 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
     # --- Insert main filing row ---
     try:
         cursor.execute("""
-            INSERT OR IGNORE INTO filing_sections (
+            INSERT INTO filing_sections (
                 cik, company_name, form_type, filing_date, accession_number,
                 index_url, document_url, parse_method,
                 business, risk_factors, mda
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (accession_number) DO NOTHING
         """, (
             parsed_filing.get("cik", ""),
             parsed_filing.get("title", ""),
@@ -122,9 +123,10 @@ def save_filing(parsed_filing: dict, db_path: str) -> bool:
         for note_key, note_text in notes.items():
             try:
                 cursor.execute("""
-                    INSERT OR IGNORE INTO filing_notes (
+                    INSERT INTO filing_notes (
                         accession_number, note_key, note_text
                     ) VALUES (%s, %s, %s)
+                    ON CONFLICT (accession_number, note_key) DO NOTHING
                 """, (acc, note_key, note_text))
             except psycopg2.Error as e:
                 print(f"  [WARN] DB insert error (filing_notes): {e}")

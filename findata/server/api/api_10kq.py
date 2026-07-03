@@ -1,11 +1,11 @@
 import sys
 import asyncio
 import os
-import sqlite3
 from fastapi import Query, HTTPException, Response, APIRouter
 from fastapi.responses import JSONResponse
 from findata.sec._cik import lookup_cik as _lookup_cik
 from findata.server.db.config import SEC_10KQ_DB, COMPANY_FACTS_DB
+from findata.server.db.engine import connect as _db_connect
 from findata.server.company_data import (
     SECRateLimit,
     TickerNotFound,
@@ -48,21 +48,25 @@ def list_documents(ticker: str):
         raise HTTPException(status_code=404, detail=f"CIK not found for {ticker}")
 
     def _query_filings(cik_val: str) -> list[dict]:
-        if not os.path.exists(SEC_10KQ_DB):
-            return []
-        conn = sqlite3.connect(SEC_10KQ_DB)
-        conn.row_factory = sqlite3.Row
         cik_padded = cik_val.lstrip("0")
-        rows = conn.execute(
-            """
-            SELECT accession_number, form_type, filing_date, company_name
-            FROM filing_sections
-            WHERE cik IN (?, ?)
-            ORDER BY filing_date DESC
-            """,
-            (cik_val, cik_padded)
-        ).fetchall()
-        conn.close()
+        try:
+            conn = _db_connect(SEC_10KQ_DB)
+        except Exception:
+            return []
+        try:
+            rows = conn.execute(
+                """
+                SELECT accession_number, form_type, filing_date, company_name
+                FROM filing_sections
+                WHERE cik IN (%s, %s)
+                ORDER BY filing_date DESC
+                """,
+                (cik_val, cik_padded)
+            ).fetchall()
+        except Exception:
+            rows = []
+        finally:
+            conn.close()
         return [dict(r) for r in rows]
 
     filings = _query_filings(cik)
@@ -83,17 +87,13 @@ def list_documents(ticker: str):
 @router.get("/api/documents/{ticker}/{accession_number}")
 def get_document_detail(ticker: str, accession_number: str):
     """Return MD&A and Risk Factors for a specific filing."""
-    if not os.path.exists(SEC_10KQ_DB):
-        raise HTTPException(status_code=404, detail="sec_10kq.db not found")
-        
-    conn = sqlite3.connect(SEC_10KQ_DB)
-    conn.row_factory = sqlite3.Row
-    
+    conn = _db_connect(SEC_10KQ_DB)
+
     row = conn.execute(
         """
         SELECT company_name, form_type, filing_date, business, risk_factors, mda
         FROM filing_sections
-        WHERE accession_number = ?
+        WHERE accession_number = %s
         """,
         (accession_number,)
     ).fetchone()
@@ -106,7 +106,7 @@ def get_document_detail(ticker: str, accession_number: str):
         """
         SELECT note_key, note_text
         FROM filing_notes
-        WHERE accession_number = ?
+        WHERE accession_number = %s
         ORDER BY id ASC
         """,
         (accession_number,)
@@ -119,21 +119,25 @@ def get_document_detail(ticker: str, accession_number: str):
     }
 
 def _query_financial_periods(cik: str) -> list[dict]:
-    if not os.path.exists(COMPANY_FACTS_DB):
+    try:
+        conn = _db_connect(COMPANY_FACTS_DB)
+    except Exception:
         return []
-    conn = sqlite3.connect(COMPANY_FACTS_DB)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT fy, fp, form, filed, COUNT(*) as fact_count
-        FROM company_facts
-        WHERE cik = ?
-        GROUP BY fy, fp, form, filed
-        ORDER BY filed DESC
-        """,
-        (cik,),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            """
+            SELECT fy, fp, form, filed, COUNT(*) as fact_count
+            FROM company_facts
+            WHERE cik = %s
+            GROUP BY fy, fp, form, filed
+            ORDER BY filed DESC
+            """,
+            (cik,),
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 
@@ -166,20 +170,24 @@ def list_financial_periods(ticker: str):
 
 
 def _query_financial_facts(cik: str, fy: int, fp: str, form: str, filed: str) -> list[dict]:
-    if not os.path.exists(COMPANY_FACTS_DB):
+    try:
+        conn = _db_connect(COMPANY_FACTS_DB)
+    except Exception:
         return []
-    conn = sqlite3.connect(COMPANY_FACTS_DB)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT concept, label, val, unit, fy, fp, form, period_end, filed
-        FROM company_facts
-        WHERE cik = ? AND fy = ? AND fp = ? AND form = ? AND filed = ?
-        ORDER BY concept ASC, period_end DESC
-        """,
-        (cik, fy, fp, form, filed),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            """
+            SELECT concept, label, val, unit, fy, fp, form, period_end, filed
+            FROM company_facts
+            WHERE cik = %s AND fy = %s AND fp = %s AND form = %s AND filed = %s
+            ORDER BY concept ASC, period_end DESC
+            """,
+            (cik, fy, fp, form, filed),
+        ).fetchall()
+    except Exception:
+        rows = []
+    finally:
+        conn.close()
     return [dict(r) for r in rows]
 
 
@@ -326,30 +334,32 @@ def list_sec_filings(
     # Best-effort: enrich 10-K/10-Q rows with section flags from the cache so
     # the UI can keep showing Business/Risk/MD&A badges where available.
     section_flags: dict[str, dict] = {}
-    if {"10-K", "10-Q"} & requested and os.path.exists(SEC_10KQ_DB):
+    if {"10-K", "10-Q"} & requested:
         accs = [r["accession_number"] for r in rows if r["form_type"] in ("10-K", "10-Q")]
         if accs:
-            placeholders = ",".join("?" * len(accs))
-            conn = sqlite3.connect(SEC_10KQ_DB)
-            conn.row_factory = sqlite3.Row
-            cur = conn.execute(
-                f"""
-                SELECT accession_number,
-                       (business     IS NOT NULL AND length(business)     > 0) AS has_business,
-                       (risk_factors IS NOT NULL AND length(risk_factors) > 0) AS has_risk_factors,
-                       (mda          IS NOT NULL AND length(mda)          > 0) AS has_mda
-                  FROM filing_sections
-                 WHERE accession_number IN ({placeholders})
-                """,
-                accs,
-            )
-            for r in cur.fetchall():
-                section_flags[r["accession_number"]] = {
-                    "has_business": bool(r["has_business"]),
-                    "has_risk_factors": bool(r["has_risk_factors"]),
-                    "has_mda": bool(r["has_mda"]),
-                }
-            conn.close()
+            placeholders = ",".join(["%s"] * len(accs))
+            try:
+                conn = _db_connect(SEC_10KQ_DB)
+                cur = conn.execute(
+                    f"""
+                    SELECT accession_number,
+                           (business     IS NOT NULL AND length(business)     > 0) AS has_business,
+                           (risk_factors IS NOT NULL AND length(risk_factors) > 0) AS has_risk_factors,
+                           (mda          IS NOT NULL AND length(mda)          > 0) AS has_mda
+                      FROM filing_sections
+                     WHERE accession_number IN ({placeholders})
+                    """,
+                    accs,
+                )
+                for r in cur.fetchall():
+                    section_flags[r["accession_number"]] = {
+                        "has_business": bool(r["has_business"]),
+                        "has_risk_factors": bool(r["has_risk_factors"]),
+                        "has_mda": bool(r["has_mda"]),
+                    }
+                conn.close()
+            except Exception:
+                pass
 
     out = []
     for r in rows:
