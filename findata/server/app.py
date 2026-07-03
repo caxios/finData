@@ -14,7 +14,7 @@ import sys
 import asyncio
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from findata.server.api import api_form4, api_earnigscall, api_10kq, api_cio_chat
+from findata.server.api import api_form4, api_earnigscall, api_10kq
 from findata.server.auth import require_api_key, require_gateway
 from findata.server.quota import check_quota
 from findata.server.billing.guardrail import circuit_breaker
@@ -36,7 +36,7 @@ if sys.platform in ("win32", "win64"):
 
 app = FastAPI(
     title="findata API Server",
-    description="Commercial API for SEC EDGAR and OpenDART financial data.",
+    description="Commercial API for SEC EDGAR financial data.",
     version="0.2.0",
 )
 register_error_handlers(app)
@@ -153,7 +153,6 @@ _auth_deps = [
 app.include_router(api_form4.router, prefix="/v1", dependencies=_auth_deps)
 app.include_router(api_earnigscall.router, prefix="/v1", dependencies=_auth_deps)
 app.include_router(api_10kq.router, prefix="/v1", dependencies=_auth_deps)
-app.include_router(api_cio_chat.router, prefix="/v1", dependencies=_auth_deps)
 
 
 # ── Usage endpoint (authenticated, shows caller's own usage) ────────

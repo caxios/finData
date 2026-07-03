@@ -29,9 +29,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # ── SEC database directory ──────────────────────────────────────────
 SEC_DB_DIR = DATA_DIR / "sec_db"
 
-# ── DART cache directory ────────────────────────────────────────────
-DART_CACHE_DIR = DATA_DIR / "dart_cache"
-
 # ── General data directory ──────────────────────────────────────────
 GENERAL_DATA_DIR = DATA_DIR / "data"
 
@@ -47,7 +44,6 @@ ACCOUNTS_DB = str(SEC_DB_DIR / "accounts.db")
 def ensure_data_dirs() -> None:
     """Create all server-managed data directories."""
     SEC_DB_DIR.mkdir(parents=True, exist_ok=True)
-    DART_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     GENERAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -62,12 +62,11 @@ def test_ensure_data_dirs_creates_server_directories(tmp_path):
         ensure_data_dirs()
         root = Path(os.environ["FINDATA_DATA_DIR"])
         print((root / "sec_db").is_dir())
-        print((root / "dart_cache").is_dir())
         print((root / "data").is_dir())
         """,
         data_dir,
     )
-    assert output.splitlines() == ["True", "True", "True"]
+    assert output.splitlines() == ["True", "True"]
 
 
 def test_legacy_sec_app_warns_and_reexports_server_app(tmp_path):
@@ -113,14 +112,11 @@ def test_server_extra_includes_full_server_router_dependencies():
         "uvicorn",
         "playwright",
         "tavily-python",
-        "langgraph",
-        "langchain-core",
-        "langchain-community",
-        "langchain-google-genai",
+        "psycopg2-binary",
     } <= server_deps
 
 
 def test_all_extra_reuses_server_extra():
     extras = _project_optional_dependencies()
 
-    assert extras["all"] == ["findata[server,dart,sec-parser]"]
+    assert extras["all"] == ["findata[server,sec-parser]"]

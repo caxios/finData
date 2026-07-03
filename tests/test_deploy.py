@@ -78,12 +78,10 @@ class TestWorker:
                             lambda **k: captured.update(poll=k))
         monkeypatch.setenv("FORM4_POLL_INTERVAL", "123")
         monkeypatch.setenv("SCHED_10KQ_INTERVAL", "456")
-        monkeypatch.setenv("SCHED_DART_INTERVAL", "789")
 
         worker.main()
         assert captured["poll"]["poll_interval"] == 123
         assert captured["sched"]["kq_interval"] == 456
-        assert captured["sched"]["dart_interval"] == 789
 
 
 # =====================================================================

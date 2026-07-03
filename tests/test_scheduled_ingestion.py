@@ -1,13 +1,12 @@
 """
-Tests for plan 06 — Scheduled Ingestion & Cache Freshness.
+Tests for plan 06 — Scheduled Ingestion & Cache Freshness (SEC-only).
 
 Covers:
 - universe config (load, env override, upper/dedup, missing file)
 - centralized freshness/TTL + company_data reads from it
 - throttle helpers (chunked, run_with_backoff)
 - run_10kq_refresh (universe-driven, mocked pipeline)
-- run_dart_refresh (chunking/throttle, mocked module runners)
-- scheduler run_once + DART-deps-missing handling + env gating
+- scheduler run_once + env gating
 - warmup orchestration
 """
 
@@ -24,16 +23,14 @@ class TestUniverse:
     def test_default_universe_loads(self):
         from findata.server.ingestion import universe
         assert len(universe.get_us_universe()) > 0
-        assert len(universe.get_kr_universe()) > 0
 
     def test_upper_and_dedup(self, tmp_path, monkeypatch):
         from findata.server.ingestion import universe
         f = tmp_path / "u.json"
-        f.write_text(json.dumps({"us": ["aapl", "AAPL", "msft"], "kr": ["삼성", "삼성"]}),
+        f.write_text(json.dumps({"us": ["aapl", "AAPL", "msft"]}),
                      encoding="utf-8")
         monkeypatch.setenv("FINDATA_UNIVERSE_FILE", str(f))
         assert universe.get_us_universe() == ["AAPL", "MSFT"]
-        assert universe.get_kr_universe() == ["삼성"]
 
     def test_missing_file_is_empty(self, tmp_path, monkeypatch):
         from findata.server.ingestion import universe
@@ -156,95 +153,24 @@ class TestRun10kqRefresh:
 
 
 # =====================================================================
-# run_dart_refresh (mocked runners)
-# =====================================================================
-
-class TestRunDartRefresh:
-    def test_chunks_and_runs_modules(self, monkeypatch):
-        from findata.server.ingestion import dart_batch as db
-
-        monkeypatch.setattr(
-            db, "_resolve_corp_codes",
-            lambda names: {"A": "001", "B": "002", "C": "003"},
-        )
-        calls = {"accounts": 0, "indicators": 0}
-        monkeypatch.setattr(db, "run_accounts",
-                            lambda codes, **k: calls.__setitem__("accounts", calls["accounts"] + 1))
-        monkeypatch.setattr(db, "run_indicators",
-                            lambda codes, **k: calls.__setitem__("indicators", calls["indicators"] + 1))
-
-        summary = db.run_dart_refresh(
-            universe=["A", "B", "C"], modules=["accounts", "indicators"],
-            chunk_size=2, delay=0,
-        )
-        assert summary["companies"] == 3
-        assert summary["chunks"] == 2          # ceil(3/2)
-        assert calls["accounts"] == 2          # once per chunk
-        assert calls["indicators"] == 2
-
-    def test_empty_universe(self, monkeypatch):
-        from findata.server.ingestion import dart_batch as db
-        monkeypatch.setattr(db, "_resolve_corp_codes", lambda names: {})
-        summary = db.run_dart_refresh(universe=["X"], modules=["accounts"], delay=0)
-        assert summary["companies"] == 0
-
-    def test_quota_error_is_retried(self, monkeypatch):
-        from findata.server.ingestion import dart_batch as db
-        monkeypatch.setattr(db, "_resolve_corp_codes", lambda names: {"A": "001"})
-        attempts = {"n": 0}
-
-        def flaky_accounts(codes, **k):
-            attempts["n"] += 1
-            if attempts["n"] < 2:
-                raise RuntimeError("rate limit exceeded")  # _is_quota_error → retry
-
-        monkeypatch.setattr(db, "run_accounts", flaky_accounts)
-        db.run_dart_refresh(universe=["A"], modules=["accounts"],
-                            chunk_size=10, delay=0, base_delay=0)
-        assert attempts["n"] == 2  # retried once then succeeded
-
-
-# =====================================================================
 # scheduler + warmup
 # =====================================================================
 
 class TestScheduler:
-    def test_run_once_calls_both(self, monkeypatch):
+    def test_run_once_calls_10kq(self, monkeypatch):
         from findata.server.ingestion import scheduled
         calls = []
         monkeypatch.setattr(scheduled, "refresh_10kq", lambda count=5: calls.append("kq"))
-        monkeypatch.setattr(scheduled, "refresh_dart", lambda: calls.append("dart"))
         scheduled.run_once()
-        assert calls == ["kq", "dart"]
-
-    def test_refresh_dart_handles_missing_deps(self, monkeypatch):
-        from findata.server.ingestion import scheduled, dart_batch
-        def raise_missing():
-            raise ModuleNotFoundError("No module named 'dart_fss'")
-        monkeypatch.setattr(dart_batch, "run_dart_refresh", lambda *a, **k: raise_missing())
-        # Should not raise; records an error in status
-        scheduled.refresh_dart()
-        assert "dart deps missing" in (scheduled.get_scheduler_status()["last_error"] or "")
+        assert calls == ["kq"]
 
 
 class TestWarmup:
-    def test_warmup_runs_both(self, monkeypatch):
-        from findata.server.ingestion import warmup, sec_10kq_ingest, dart_batch
+    def test_warmup_runs_us(self, monkeypatch):
+        from findata.server.ingestion import warmup, sec_10kq_ingest
         monkeypatch.setattr(sec_10kq_ingest, "run_10kq_refresh", lambda **k: None)
-        monkeypatch.setattr(dart_batch, "run_dart_refresh", lambda **k: {"companies": 3})
         result = warmup.run_warmup()
         assert result["us"] == "ok"
-        assert result["kr"] == {"companies": 3}
-
-    def test_warmup_kr_deps_missing(self, monkeypatch):
-        from findata.server.ingestion import warmup, sec_10kq_ingest, dart_batch
-        monkeypatch.setattr(sec_10kq_ingest, "run_10kq_refresh", lambda **k: None)
-        def raise_missing(**k):
-            raise ModuleNotFoundError("dart_fss")
-        monkeypatch.setattr(dart_batch, "run_dart_refresh", raise_missing)
-        result = warmup.run_warmup()
-        assert result["us"] == "ok"
-        assert "skipped" in result["kr"]
 
 
 class TestAppGating:

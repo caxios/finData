@@ -11,8 +11,7 @@ be edited without touching code, and overridden per-deployment with the
 
 Shape::
 
-    { "us": ["AAPL", ...],   # SEC tickers
-      "kr": ["삼성전자", ...] }  # OpenDART company names
+    { "us": ["AAPL", ...] }   # SEC tickers
 """
 
 from __future__ import annotations
@@ -51,17 +50,4 @@ def get_us_universe(path: str | None = None) -> list[str]:
         if u and u not in seen:
             seen.add(u)
             out.append(u)
-    return out
-
-
-def get_kr_universe(path: str | None = None) -> list[str]:
-    """OpenDART company names in the universe (de-duplicated, ordered)."""
-    raw = load_universe(path).get("kr", []) or []
-    seen: set[str] = set()
-    out: list[str] = []
-    for n in raw:
-        name = str(n).strip()
-        if name and name not in seen:
-            seen.add(name)
-            out.append(name)
     return out

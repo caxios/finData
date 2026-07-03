@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "findata"
 version = "0.2.0"
-description = "Financial data library for SEC and OpenDart"
+description = "Financial data library for SEC"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -22,30 +22,16 @@ server = [
     "uvicorn",
     "playwright",
     "tavily-python",
-    "langgraph",
-    "langchain-core",
-    "langchain-community",
-    "langchain-google-genai",
     "psycopg2-binary",
 ]
 transcripts = [
     "tavily-python",
 ]
-dart = [
-    "dart-fss",
-    "pandas",
-]
 sec-parser = [
     "sec-parser",
 ]
-agents = [
-    "langgraph",
-    "langchain-core",
-    "langchain-community",
-    "langchain-google-genai",
-]
 all = [
-    "findata[server,dart,sec-parser]",
+    "findata[server,sec-parser]",
 ]
 dev = [
     "pytest",
@@ -60,4 +46,3 @@ include = ["findata*"]
 # Ship non-Python data files inside the wheel (e.g. the data universe config)
 # so a non-editable install (Docker image) has them.
 "findata.server.ingestion" = ["*.json"]
-"findata.dart" = ["*.json"]
