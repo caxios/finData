@@ -86,7 +86,7 @@ def _schema_key(form: str) -> str:
     return "SC 13" if form in ("SC 13D", "SC 13G") else form
 
 
-def _connect(form: str) -> sqlite3.Connection:
+def _connect(form: str):
     db_path = DB_PATHS[form]
     ensure_parent_dir(db_path)
     conn = connect(db_path)
@@ -109,30 +109,34 @@ def save_filing(form: str, parsed: dict[str, Any]) -> bool:
             parsed.get("full_text"),
         )
         if form == "8-K":
-            sql = (f"INSERT OR IGNORE INTO {table} "
+            sql = (f"INSERT INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, items_json) "
-                   f"VALUES (%s, %s, %s, %s, %s, %s, %s)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                   f"ON CONFLICT (accession_number) DO NOTHING")
             extras = (json.dumps(parsed.get("items", []), ensure_ascii=False),)
         elif form == "S-4":
-            sql = (f"INSERT OR IGNORE INTO {table} "
+            sql = (f"INSERT INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, sections_json) "
-                   f"VALUES (%s, %s, %s, %s, %s, %s, %s)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                   f"ON CONFLICT (accession_number) DO NOTHING")
             extras = (json.dumps(parsed.get("sections", {}), ensure_ascii=False),)
         elif form in ("SC 13D", "SC 13G"):
-            sql = (f"INSERT OR IGNORE INTO {table} "
+            sql = (f"INSERT INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, "
                    f" beneficial_owner, shares_owned, percent_owned) "
-                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                   f"ON CONFLICT (accession_number) DO NOTHING")
             extras = (
                 parsed.get("beneficial_owner"),
                 parsed.get("shares_owned"),
                 parsed.get("percent_owned"),
             )
         elif form == "144":
-            sql = (f"INSERT OR IGNORE INTO {table} "
+            sql = (f"INSERT INTO {table} "
                    f"(cik, accession_number, form_type, filing_date, document_url, full_text, "
                    f" issuer_name, shares_to_be_sold, aggregate_value, broker, sale_date) "
-                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+                   f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                   f"ON CONFLICT (accession_number) DO NOTHING")
             extras = (
                 parsed.get("issuer_name"),
                 parsed.get("shares_to_be_sold"),

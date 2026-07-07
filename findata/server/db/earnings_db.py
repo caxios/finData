@@ -67,10 +67,11 @@ def save_transcript(db_path: str, *, ticker: str, fiscal_year: int, fiscal_quart
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT OR IGNORE INTO earnings_transcripts (
+        INSERT INTO earnings_transcripts (
             ticker, fiscal_year, fiscal_quarter, cik, call_date,
             source_url, source_domain, title, transcript_text, fetched_at
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (ticker, fiscal_year, fiscal_quarter, source_url) DO NOTHING
         """,
         (ticker.upper(), fiscal_year, fiscal_quarter, cik, call_date,
          source_url, domain, title, transcript_text, fetched_at),

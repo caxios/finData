@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(time curl -s -m 60 \"http://3.107.112.100/v1/api/documents/NVDA/list\" -H \"X-API-Key: fd_live_LuY1bgwnRpqYiBle2saSxVUOuq9sZX3X\" -w \"\\\\nHTTP=%{http_code}\\\\nTIME=%{time_total}\\\\n\")"
+    ]
+  }
+}

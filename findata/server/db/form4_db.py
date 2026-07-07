@@ -107,10 +107,13 @@ def record_coverage(db_path: str, ticker: str, covered_from: str, covered_to: st
     conn = connect(db_path)
     try:
         conn.execute(
-            """
-            INSERT OR IGNORE INTO form4_coverage (ticker, covered_from, covered_to, recorded_at)
-            VALUES (%s, %s, %s, %s)
-            """,
+            dbutil.dedup_insert(
+                """
+                INSERT INTO form4_coverage (ticker, covered_from, covered_to, recorded_at)
+                VALUES (%s, %s, %s, %s)
+                """,
+                conflict_cols=["ticker", "covered_from", "covered_to"],
+            ),
             (ticker.upper(), covered_from, covered_to,
              datetime.now(timezone.utc).isoformat()),
         )

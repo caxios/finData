@@ -2,6 +2,7 @@ from findata.server.db.engine import connect
 import psycopg2
 import psycopg2.extras
 
+from findata.server.db import dbutil
 from findata.server.db.config import ensure_parent_dir
 
 
@@ -77,20 +78,48 @@ def save_company_facts(facts_data, db_path: str, ticker: str = None):
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT OR REPLACE INTO companies (cik, ticker, entity_name) VALUES (%s, %s, %s)",
+        """
+        INSERT INTO companies (cik, ticker, entity_name)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (cik) DO UPDATE
+            SET ticker = EXCLUDED.ticker,
+                entity_name = EXCLUDED.entity_name
+        """,
         (cik, ticker, entity_name),
     )
 
-    before = conn.total_changes
-    cursor.executemany("""
-        INSERT OR IGNORE INTO company_facts (
-            cik, taxonomy, concept, label, unit,
-            period_start, period_end, val,
-            accn, fy, fp, form, filed, frame
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, rows)
+    inserted = 0
+    if rows:
+        # Count before/after so the (inserted, skipped) stat is accurate on both
+        # backends (executemany rowcount is unreliable across drivers).
+        before = conn.execute(
+            "SELECT COUNT(*) FROM company_facts WHERE cik = %s", (cik,)
+        ).fetchone()[0]
+        # One transaction for the whole batch — tens of thousands of rows must
+        # not commit (and fsync) per row.
+        conn.execute("BEGIN")
+        try:
+            cursor.executemany(
+                dbutil.dedup_insert(
+                    """
+                    INSERT INTO company_facts (
+                        cik, taxonomy, concept, label, unit,
+                        period_start, period_end, val,
+                        accn, fy, fp, form, filed, frame
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                ),
+                rows,
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        after = conn.execute(
+            "SELECT COUNT(*) FROM company_facts WHERE cik = %s", (cik,)
+        ).fetchone()[0]
+        inserted = after - before
     conn.commit()
-    inserted = conn.total_changes - before - 1  # minus the companies upsert
     skipped = len(rows) - inserted
     conn.close()
 

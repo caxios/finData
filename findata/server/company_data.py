@@ -96,21 +96,26 @@ def _select_10kq_rows(cik: str, limit: int = DEFAULT_LIMIT_10KQ) -> list[dict[st
     cik_unpadded = cik.lstrip("0")
     conn = sqlite3.connect(SEC_10KQ_DB)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT accession_number, form_type, filing_date, company_name,
-               index_url, document_url,
-               (business IS NOT NULL AND length(business) > 0)         AS has_business,
-               (risk_factors IS NOT NULL AND length(risk_factors) > 0) AS has_risk_factors,
-               (mda IS NOT NULL AND length(mda) > 0)                   AS has_mda
-          FROM filing_sections
-         WHERE cik IN (?, ?)
-         ORDER BY filing_date DESC
-         LIMIT ?
-        """,
-        (cik, cik_unpadded, limit),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            """
+            SELECT accession_number, form_type, filing_date, company_name,
+                   index_url, document_url,
+                   (business IS NOT NULL AND length(business) > 0)         AS has_business,
+                   (risk_factors IS NOT NULL AND length(risk_factors) > 0) AS has_risk_factors,
+                   (mda IS NOT NULL AND length(mda) > 0)                   AS has_mda
+              FROM filing_sections
+             WHERE cik IN (?, ?)
+             ORDER BY filing_date DESC
+             LIMIT ?
+            """,
+            (cik, cik_unpadded, limit),
+        ).fetchall()
+    except sqlite3.Error:
+        # DB file exists but the table hasn't been created yet (cold start).
+        return []
+    finally:
+        conn.close()
     return [
         {**dict(r), "has_business": bool(r["has_business"]),
          "has_risk_factors": bool(r["has_risk_factors"]),
@@ -135,6 +140,9 @@ def _count_10kq_rows(cik: str) -> int:
             "SELECT COUNT(*) FROM filing_sections WHERE cik IN (?, ?)",
             (cik, cik_unpadded),
         ).fetchone()
+    except sqlite3.Error:
+        # DB file exists but the table hasn't been created yet (cold start).
+        return 0
     finally:
         conn.close()
     return int(row[0]) if row else 0
