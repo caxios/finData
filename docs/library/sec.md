@@ -7,7 +7,7 @@
 
 ## 퍼블릭 API
 
-`findata.__init__.py`에서 아래 4개 함수를 최상위로 re-export합니다:
+`findata.__init__.py`에서 아래 5개 함수를 최상위로 re-export합니다:
 
 ```python
 import findata
@@ -25,80 +25,392 @@ findata.get_transcript(ticker, ...)   # → 어닝스콜 트랜스크립트
 
 ### `form4.py` — 내부자 거래 (Form 4)
 
-| 함수 | 설명 |
-|------|------|
-| `get_insider_trades(ticker, count)` | SEC EDGAR에서 Form 4 데이터를 수집하여 반환 |
+#### `get_insider_trades(ticker, count, delay)`
 
-- SEC의 최근 Form 4 RSS 피드 또는 개별 Ticker 페이지에서 데이터를 가져옵니다.
-- `findata.sec.utils.form4` 모듈의 파서를 사용합니다.
+SEC EDGAR에서 Form 4 XML을 수집·파싱하여 내부자 거래 데이터를 반환합니다.
+각 (owner × transaction) 조합이 하나의 dict으로 평탄화됩니다.
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 (예: `"AAPL"`) |
+| `count` | `int` | ✗ | `5` | 가져올 최근 Form 4 공시 수 |
+| `delay` | `float` | ✗ | `0.2` | SEC 요청 사이의 대기 시간(초). SEC Fair Access 정책 준수용 |
+
+**반환값:** `list[dict[str, Any]]` — `transaction_date` 기준 내림차순 정렬
+
+반환되는 dict의 주요 키:
+
+| 키 | 설명 |
+|----|------|
+| `ticker` | 주식 심볼 |
+| `owner_name` | 내부자 이름 |
+| `officer_title` | 직책 (예: `"CEO"`, `"CFO"`) |
+| `is_director` | 이사 여부 |
+| `is_officer` | 임원 여부 |
+| `is_ten_pct_owner` | 10% 이상 주주 여부 |
+| `transaction_date` | 거래일 |
+| `transaction_code` | 거래 유형 코드 (`P` = 매수, `S` = 매도 등) |
+| `security_title` | 증권 종류 |
+| `shares` | 거래 주식 수 |
+| `price_per_share` | 주당 가격 |
+| `transaction_value` | 총 거래 금액 |
+| `source_url` | 원본 Form 4 문서 URL |
+| `period_of_report` | 보고 기간 |
+| `issuer_name` | 발행사 이름 |
+| `issuer_cik` | 발행사 CIK |
+
+**예외:** `ValueError` — 티커가 CIK로 변환될 수 없는 경우
+
+**예시:**
+
+```python
+import findata
+
+# 기본 사용: 최근 5건의 Form 4
+trades = findata.get_insider_trades("AAPL")
+for t in trades:
+    print(f"{t['owner_name']} | {t['transaction_code']} | "
+          f"{t.get('shares', 'N/A')} shares @ ${t.get('price_per_share', 'N/A')}")
+
+# 더 많은 공시 가져오기 (SEC 레이트리밋 주의)
+trades = findata.get_insider_trades("NVDA", count=20, delay=0.3)
+
+# 매수(P)만 필터링
+buys = [t for t in trades if t.get("transaction_code") == "P"]
+print(f"최근 매수 건수: {len(buys)}")
+
+# 특정 기간의 대규모 거래만 추출
+big_trades = [
+    t for t in trades
+    if t.get("transaction_value") and t["transaction_value"] > 1_000_000
+]
+```
 
 ---
 
 ### `filings.py` — 10-K/10-Q 공시
 
-| 함수 | 설명 |
-|------|------|
-| `get_filings(ticker, form_type, count, parse_sections, ...)` | 10-K/10-Q 공시 메타데이터 + 파싱된 섹션 반환 |
-| `get_filing_text(ticker, form, document_url, ...)` | 특정 공시(8-K, S-4, SC 13D, 144)의 텍스트 파싱 |
+#### `get_filings(ticker, form_type, count, include_archive, parse_sections, delay)`
 
-**`get_filings()` 파라미터**:
-- `form_type`: 쉼표로 구분된 Form 유형 (기본값: `"10-K,10-Q"`)
-- `count`: 반환할 공시 수 (기본값: `4`)
-- `parse_sections`: `True`면 HTML을 다운로드하여 Business, Risk Factors, MD&A, Financial Notes 섹션을 추출. `False`면 메타데이터만 반환 (훨씬 빠름).
-- `include_archive`: `True`면 오래된 공시 아카이브까지 포함.
+SEC EDGAR의 submissions JSON에서 공시 메타데이터를 수집하고, 선택적으로
+각 공시의 HTML을 다운로드하여 Business, Risk Factors, MD&A, Financial Notes
+섹션을 파싱합니다.
 
-**`get_filing_text()` 지원 Form 유형**: `8-K`, `S-4`, `SC 13D`, `SC 13G`, `144`
+**파라미터:**
 
-**의존 모듈**:
-- `findata.sec.utils.sec_10kq.sec_10kq_rss` — EDGAR submissions JSON에서 공시 메타데이터 추출
-- `findata.sec.utils.sec_10kq.sec_10kq_parser` — 10-K/10-Q HTML 파싱
-- `findata.sec.utils.sec_filings.parser_8k` — 8-K 파서
-- `findata.sec.utils.sec_filings.parser_s4` — S-4 파서
-- `findata.sec.utils.sec_filings.parser_sc13` — SC 13D/G 파서
-- `findata.sec.utils.sec_filings.parser_144` — Form 144 파서
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 (예: `"AAPL"`) |
+| `form_type` | `str` | ✗ | `"10-K,10-Q"` | 쉼표로 구분된 Form 유형 |
+| `count` | `int` | ✗ | `4` | 반환할 공시 수 |
+| `include_archive` | `bool` | ✗ | `False` | `True`면 오래된 공시 아카이브까지 순회하여 전체 이력 포함 |
+| `parse_sections` | `bool` | ✗ | `True` | `True`면 HTML을 다운로드하여 섹션 추출. `False`면 메타데이터만 반환 (훨씬 빠름) |
+| `delay` | `float` | ✗ | `0.2` | SEC 요청 사이의 대기 시간(초) |
+
+**반환값:** `list[dict[str, Any]]` — `filing_date` 기준 내림차순 정렬
+
+`parse_sections=True` 시 반환 dict의 주요 키:
+
+| 키 | 설명 |
+|----|------|
+| `accession_number` | SEC accession number |
+| `form_type` | 공시 유형 (`"10-K"`, `"10-Q"`) |
+| `filing_date` | 제출일 |
+| `company_name` | 회사명 |
+| `document_url` | 원본 문서 URL |
+| `business` | 사업 개요 섹션 (Item 1) |
+| `risk_factors` | 위험 요인 섹션 (Item 1A) |
+| `mda` | 경영진 토의 및 분석 섹션 (Item 7) |
+| `financial_notes` | 재무제표 주석 목록 |
+
+**예외:** `ValueError` — 티커가 CIK로 변환될 수 없는 경우
+
+**예시:**
+
+```python
+import findata
+
+# 최근 10-K/10-Q 4건 가져오기 (파싱 포함)
+filings = findata.get_filings("AAPL")
+for f in filings:
+    print(f"{f['form_type']} | {f['filing_date']}")
+    if f.get("risk_factors"):
+        print(f"  Risk Factors: {f['risk_factors'][:200]}...")
+
+# 10-K만 가져오기
+annual = findata.get_filings("MSFT", form_type="10-K", count=3)
+
+# 메타데이터만 빠르게 조회 (파싱 없이)
+meta_only = findata.get_filings("GOOGL", parse_sections=False, count=10)
+for m in meta_only:
+    print(f"{m['form_type']} | {m['filing_date']} | {m['accession_number']}")
+
+# 전체 이력 포함
+full_history = findata.get_filings(
+    "TSLA", count=20, include_archive=True, parse_sections=False
+)
+```
+
+---
+
+#### `get_filing_text(ticker, form, document_url, accession_number, filing_date)`
+
+8-K, S-4, SC 13D, SC 13G, Form 144 등 특정 공시 문서를 다운로드하여
+Form별 전용 파서로 텍스트 섹션을 추출합니다.
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 |
+| `form` | `str` | ✔ | — | Form 유형. 지원: `"8-K"`, `"S-4"`, `"SC 13D"`, `"SC 13G"`, `"144"` |
+| `document_url` | `str` | ✔ | — | 원본 문서의 SEC URL |
+| `accession_number` | `str` | ✗ | `""` | SEC accession number (메타데이터용) |
+| `filing_date` | `str \| None` | ✗ | `None` | 제출일 (YYYY-MM-DD, 메타데이터용) |
+
+**반환값:** `dict[str, Any] | None` — 파싱된 공시 dict, 실패 시 `None`
+
+반환 dict에 자동 추가되는 키: `cik`, `accession_number`, `form_type`, `filing_date`, `document_url`  
+나머지 키는 Form 유형별 파서에 따라 다릅니다.
+
+**예외:** `ValueError` — 지원하지 않는 Form 유형인 경우
+
+**예시:**
+
+```python
+import findata
+
+# 8-K 공시 텍스트 파싱
+parsed = findata.get_filing_text(
+    ticker="AAPL",
+    form="8-K",
+    document_url="https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/form8k.htm",
+    accession_number="0000320193-24-000123",
+    filing_date="2024-05-01",
+)
+if parsed:
+    print(f"Form: {parsed['form_type']}")
+    print(f"Date: {parsed['filing_date']}")
+    # 파싱된 섹션은 Form 유형에 따라 다름
+    for key, value in parsed.items():
+        if isinstance(value, str) and len(value) > 100:
+            print(f"  {key}: {value[:150]}...")
+
+# get_filings와 조합하여 사용
+filings = findata.get_filings("NVDA", form_type="10-K", parse_sections=False)
+# sec-filings 엔드포인트 등에서 얻은 8-K URL로 텍스트 파싱
+```
 
 ---
 
 ### `financials.py` — XBRL 재무 팩트
 
-| 함수 | 설명 |
-|------|------|
-| `get_financials(ticker)` | SEC CompanyFacts API에서 XBRL 관측값을 평탄화하여 반환 |
+#### `get_financials(ticker)`
 
-- `https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json`에서 원본 JSON을 가져옵니다.
-- 중첩된 JSON 구조 (`facts → taxonomy → concept → units → observations`)를 1차원 `list[dict]`로 변환합니다.
-- 반환되는 키: `cik`, `taxonomy`, `concept`, `label`, `unit`, `period_start`, `period_end`, `val`, `accn`, `fy`, `fp`, `form`, `filed`, `frame`
+SEC CompanyFacts API (`data.sec.gov/api/xbrl/companyfacts/`)에서 XBRL 데이터를
+가져와 중첩된 JSON 구조를 1차원 `list[dict]`로 평탄화합니다.
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 (예: `"AAPL"`) |
+
+**반환값:** `list[dict[str, Any]]`
+
+반환 dict의 키:
+
+| 키 | 타입 | 설명 |
+|----|------|------|
+| `cik` | `str` | 10자리 zero-padded CIK |
+| `taxonomy` | `str` | XBRL 택소노미 (예: `"us-gaap"`, `"dei"`) |
+| `concept` | `str` | 개념명 (예: `"Revenue"`, `"Assets"`) |
+| `label` | `str` | 사람이 읽을 수 있는 라벨 |
+| `unit` | `str` | 단위 (예: `"USD"`, `"shares"`) |
+| `period_start` | `str \| None` | 기간 시작일 |
+| `period_end` | `str` | 기간 종료일 |
+| `val` | `float \| int` | 값 |
+| `accn` | `str \| None` | accession number |
+| `fy` | `int \| None` | 회계연도 |
+| `fp` | `str \| None` | 회계분기 (예: `"Q1"`, `"FY"`) |
+| `form` | `str \| None` | 공시 유형 (예: `"10-K"`) |
+| `filed` | `str \| None` | 제출일 |
+| `frame` | `str \| None` | XBRL 프레임 (예: `"CY2024Q1I"`) |
+
+**예외:**
+- `ValueError` — 티커가 CIK로 변환될 수 없거나 데이터가 없는 경우
+
+**예시:**
+
+```python
+import findata
+
+# 전체 XBRL 팩트 가져오기
+facts = findata.get_financials("AAPL")
+print(f"총 {len(facts)}개의 XBRL 관측값")
+
+# 매출(Revenue) 데이터만 추출
+revenue = [
+    f for f in facts
+    if f["concept"] == "Revenues" and f["form"] == "10-K"
+]
+for r in revenue:
+    print(f"FY{r['fy']} | {r['unit']} {r['val']:,.0f} | filed: {r['filed']}")
+
+# 특정 분기 데이터 필터링
+q1_2024 = [
+    f for f in facts
+    if f["fy"] == 2024 and f["fp"] == "Q1"
+]
+print(f"2024 Q1: {len(q1_2024)}개의 팩트")
+
+# 택소노미별 그룹핑
+from collections import Counter
+taxonomies = Counter(f["taxonomy"] for f in facts)
+for tax, cnt in taxonomies.most_common():
+    print(f"  {tax}: {cnt}개")
+```
 
 ---
 
 ### `transcripts.py` — 어닝스콜 트랜스크립트
 
-| 함수 | 설명 |
-|------|------|
-| `get_transcript(ticker, year, quarter)` | Tavily API를 통해 어닝스콜 트랜스크립트 검색 |
+#### `get_transcript(ticker, year, quarter)`
 
-- `pip install findata[transcripts]` 필요 (Tavily 의존성).
-- 환경변수 `TAVILY_API_KEY` 필요.
+Tavily API를 통해 여러 소스(Motley Fool, Rev.com, Seeking Alpha 등)에서
+어닝스콜 트랜스크립트를 검색하고, 도메인 우선순위 + 키워드 매칭 점수로
+최적의 결과를 선택하여 반환합니다.
+
+> ⚠️ 호출할 때마다 Tavily API 크레딧이 소비됩니다 (라이브러리 계층은 캐시가 없습니다).
+
+**사전 요구사항:**
+- `pip install findata[transcripts]` (또는 `pip install findata[all]`)
+- 환경변수 `TAVILY_API_KEY=tvly-xxxxx` 설정
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 (예: `"AAPL"`) |
+| `year` | `int` | ✔ | — | 회계연도 (예: `2024`) |
+| `quarter` | `int` | ✔ | — | 회계분기 (`1`–`4`) |
+
+**반환값:** `dict[str, Any] | None` — 트랜스크립트를 찾지 못하면 `None`
+
+반환 dict의 키:
+
+| 키 | 타입 | 설명 |
+|----|------|------|
+| `ticker` | `str` | 주식 심볼 (대문자) |
+| `fiscal_year` | `int` | 회계연도 |
+| `fiscal_quarter` | `int` | 회계분기 |
+| `source_url` | `str` | 트랜스크립트 원본 URL |
+| `source_domain` | `str` | 소스 도메인 (예: `"fool.com"`) |
+| `title` | `str` | 페이지 제목 |
+| `transcript_text` | `str` | 트랜스크립트 전문 (최소 2,000자 이상) |
+
+**예외:**
+- `ValueError` — `quarter`가 1–4 범위를 벗어난 경우
+- `RuntimeError` — `TAVILY_API_KEY`가 설정되지 않은 경우
+
+**검색 우선순위 도메인:**
+
+| 도메인 | 우선순위 점수 |
+|--------|:----------:|
+| `fool.com` (Motley Fool) | 100 |
+| `rev.com` | 80 |
+| `insidermonkey.com` | 60 |
+| `investing.com` | 50 |
+| `seekingalpha.com` | 40 |
+
+**예시:**
+
+```python
+import findata
+
+# 기본 사용
+transcript = findata.get_transcript("AAPL", year=2024, quarter=4)
+if transcript:
+    print(f"소스: {transcript['source_domain']}")
+    print(f"제목: {transcript['title']}")
+    print(f"분량: {len(transcript['transcript_text']):,}자")
+    print(f"URL: {transcript['source_url']}")
+    print(f"\n--- 트랜스크립트 시작 ---\n")
+    print(transcript["transcript_text"][:500])
+else:
+    print("트랜스크립트를 찾을 수 없습니다.")
+
+# 여러 분기 순회
+for q in range(1, 5):
+    result = findata.get_transcript("MSFT", year=2024, quarter=q)
+    status = f"{len(result['transcript_text']):,}자" if result else "없음"
+    print(f"MSFT 2024 Q{q}: {status}")
+```
 
 ---
 
 ### `_cik.py` — Ticker → CIK 변환
 
-| 함수 | 설명 |
-|------|------|
-| `lookup_cik(ticker)` | Ticker 심볼을 SEC CIK 번호로 변환 |
+#### `lookup_cik(ticker)`
 
-- `sec-cik-mapper` 패키지를 사용합니다.
-- `(cik: str, company_name: str)` 튜플을 반환합니다.
+`sec-cik-mapper` 패키지의 오프라인 JSON 매핑을 사용하여 티커 심볼을
+SEC CIK 번호로 변환합니다. 네트워크 호출이나 DB 접근 없이 동작합니다.
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `ticker` | `str` | ✔ | — | 주식 심볼 (대소문자 무관) |
+
+**반환값:** `tuple[str | None, str | None]` — `(CIK zero-padded, entity_name)`  
+티커를 찾을 수 없으면 `(None, None)` 반환.
+
+**예시:**
+
+```python
+from findata.sec._cik import lookup_cik
+
+# 정상 조회
+cik, name = lookup_cik("AAPL")
+print(f"CIK: {cik}, Name: {name}")
+# → CIK: 0000320193, Name: AAPL
+
+# 대소문자 무관
+cik, _ = lookup_cik("aapl")   # 동일 결과
+
+# 미등록 티커
+cik, name = lookup_cik("INVALID_TICKER")
+print(cik, name)
+# → None None
+```
 
 ---
 
 ### `const.py` — 공통 상수
 
-| 상수 | 설명 |
-|------|------|
-| `HEADERS` | SEC Fair Access 정책 준수를 위한 `User-Agent` 헤더 |
-| `TAVILY_API_KEY` | 환경변수에서 읽은 Tavily API 키 |
+| 상수 | 타입 | 설명 |
+|------|------|------|
+| `HEADERS` | `dict` | SEC Fair Access 정책 준수를 위한 `User-Agent` 헤더. 환경변수 `FINDATA_SEC_USER_AGENT`로 오버라이드 가능 |
+| `TAVILY_API_KEY` | `str \| None` | 환경변수 `TAVILY_API_KEY`에서 읽은 Tavily API 키 |
+
+**예시:**
+
+```python
+from findata.sec.const import HEADERS, TAVILY_API_KEY
+
+# SEC API 직접 호출 시 헤더 사용
+import requests
+resp = requests.get(
+    "https://efts.sec.gov/LATEST/search-index?q=AAPL",
+    headers=HEADERS,
+)
+
+# Tavily 키 확인
+if TAVILY_API_KEY:
+    print("Tavily API 키가 설정되어 있습니다.")
+```
 
 ---
 
