@@ -129,6 +129,8 @@ def _query_financial_periods(cik: str) -> list[dict]:
             SELECT fy, fp, form, filed, COUNT(*) as fact_count
             FROM company_facts
             WHERE cik = %s
+              AND fy IS NOT NULL
+              AND fp IS NOT NULL
             GROUP BY fy, fp, form, filed
             ORDER BY filed DESC
             """,
