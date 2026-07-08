@@ -5,6 +5,53 @@
 
 ---
 
+## 로컬 환경 설치 및 설정 (프로토타이핑/테스트용)
+
+아직 PyPI에 배포하지 않은 상태에서 Jupyter Notebook(`.ipynb`)이나 로컬 스크립트에서 패키지를 사용하려면, 소스 코드가 있는 디렉토리에서 **Editable 모드(`-e`)**로 로컬 설치해야 합니다. 이렇게 설치하면 파이썬이 `pyproject.toml`에 명시된 필수 외부 라이브러리(`sec-cik-mapper`, `requests`, `beautifulsoup4` 등)를 알아서 한 번에 설치해 주고, 패키지 내부 코드 변경 사항도 실시간으로 반영됩니다.
+
+**터미널에서 다음 명령어 실행:**
+
+```bash
+# 1. findata 폴더(프로젝트 루트)로 이동
+cd c:\finData
+
+# 2. 로컬 설치 (의존성 자동 설치 포함)
+pip install -e .
+
+# 3. 만약 PDF 다운로드나 어닝스콜 기능이 추가로 필요하다면 아래 명령어로 설치
+pip install -e .[server,transcripts]
+playwright install chromium
+```
+
+이제 `.ipynb` 파일이나 파이썬 스크립트 어디에서든 `sys.path` 조작 없이 깔끔하게 `import findata`만 적어주면 바로 패키지를 사용할 수 있습니다!
+
+### 💡 팁: 불러온 데이터를 파일(Excel, TXT)로 추출하기 (Jupyter Notebook 활용)
+
+`findata` 패키지의 데이터 수집 함수들은 결과를 파이썬 기본 딕셔너리 리스트(`list[dict]`)로 반환합니다. 이를 `pandas` 라이브러리를 활용해 DataFrame으로 변환하면 아주 쉽게 데이터 파일로 저장할 수 있습니다.
+
+```python
+import pandas as pd
+import findata
+
+# 1. 패키지 함수로 데이터 불러오기
+facts = findata.get_financials("AAPL")
+
+# 2. DataFrame으로 변환
+facts_df = pd.DataFrame(facts)
+
+# 3. Excel (.xlsx) 파일로 저장
+excel_filename = "AAPL_financial_facts.xlsx"
+facts_df.to_excel(excel_filename, index=False)
+print(f"데이터를 '{excel_filename}' 파일로 저장했습니다.")
+
+# 4. Text (.txt) 파일로 저장 (탭으로 구분)
+txt_filename = "AAPL_financial_facts.txt"
+facts_df.to_csv(txt_filename, sep='\t', index=False)
+print(f"데이터를 '{txt_filename}' 파일로 저장했습니다.")
+```
+
+---
+
 ## 퍼블릭 API
 
 `findata.__init__.py`에서 아래 6개 함수를 최상위로 re-export합니다:
@@ -381,18 +428,9 @@ SEC 공시 페이지를 Playwright(headless Chromium)로 렌더링하여 PDF로 
 - `RuntimeError` — Playwright가 설치되어 있지 않은 경우
 - 기타 Playwright/브라우저 관련 오류는 그대로 전파됩니다
 
-**예시 (로컬 Jupyter Notebook 환경 포함):**
-
-PyPI에 배포되지 않은 로컬 패키지를 Jupyter Notebook(`.ipynb`)에서 사용하려면, `sys.path`에 프로젝트 루트를 추가해야 합니다.
+**예시:**
 
 ```python
-import sys
-import os
-
-# 1. 로컬 프로젝트 루트 경로를 sys.path에 추가 (ipynb 파일 위치에 따라 상대 경로 조정)
-# 예: ipynb 파일이 프로젝트 루트에 있다면 os.path.abspath('.') 사용
-sys.path.append(os.path.abspath('c:/finData'))
-
 import findata
 
 # ── 단일 URL: PDF 바이트만 가져오기 ──

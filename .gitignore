@@ -9,6 +9,7 @@ dist/
 *.egg-info/
 .pytest_cache/
 uv.lock
+output/
 
 # Secrets — never commit private keys or env files
 *.pem

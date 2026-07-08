@@ -89,6 +89,22 @@ pdf_bytes = findata.download_filing_pdf(
     "https://www.sec.gov/Archives/edgar/data/320193/...",
     output_path="aapl_10k.pdf",   # 파일로 저장 (선택)
 )
+
+# ── 불러온 데이터를 파일(Excel, TXT)로 저장하기 (Pandas 활용) ──
+import pandas as pd
+
+# (예시) 앞에서 불러온 XBRL 재무 팩트를 DataFrame으로 변환
+facts_df = pd.DataFrame(facts)
+
+# 1. Excel (.xlsx) 파일로 저장
+excel_filename = "AAPL_financial_facts.xlsx"
+facts_df.to_excel(excel_filename, index=False)
+print(f"데이터를 '{excel_filename}' 파일로 저장했습니다.")
+
+# 2. Text (.txt) 파일로 저장 (탭으로 구분)
+txt_filename = "AAPL_financial_facts.txt"
+facts_df.to_csv(txt_filename, sep='\t', index=False)
+print(f"데이터를 '{txt_filename}' 파일로 저장했습니다.")
 ```
 
 공개 함수는 `findata` 최상위에 노출됩니다:
