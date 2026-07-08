@@ -506,10 +506,18 @@ def generate_pdf(
         urls = [url]
 
     # Render via the library layer (single URL → PDF bytes, multiple → ZIP bytes).
-    from findata.sec.pdf import download_filing_pdf
+    from findata.sec.pdf import download_filing_pdf, SECAccessBlocked
 
     try:
         data = download_filing_pdf(urls)
+    except SECAccessBlocked as e:
+        # SEC rate-limited us — surface as 429 so callers can back off, and
+        # don't hand back a PDF of the block page.
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"code": "SEC_RATE_LIMITED", "message": str(e)}},
+            headers={"Retry-After": "300"},
+        )
     except RuntimeError as e:  # Playwright not installed
         raise HTTPException(status_code=503, detail=str(e))
 

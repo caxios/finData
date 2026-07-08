@@ -25,12 +25,49 @@ Requires: pip install "findata[server]" (Playwright + Chromium)
 from __future__ import annotations
 
 import io
+import os
 import re
+import shutil
+import sys
+import time
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
-from findata.sec.const import SEC_USER_AGENT
+import requests
+
+from findata.sec.const import HEADERS, SEC_USER_AGENT
+
+# Exit code the subprocess worker uses to signal a SEC rate-limit block, so the
+# parent can re-raise SECAccessBlocked instead of a generic RuntimeError.
+_WORKER_BLOCKED_CODE = 3
+
+# Project root (the dir containing the ``findata`` package) — passed to the
+# render subprocess on PYTHONPATH so it can import findata no matter what its
+# working directory is (e.g. a notebook opened from an unrelated folder).
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+
+
+class SECAccessBlocked(RuntimeError):
+    """Raised when SEC serves its 'undeclared automated tool' interstitial.
+
+    SEC's rate limiter returns an HTML block page *in place of* the filing when
+    it decides traffic looks automated (usually from request volume/bursts, or
+    a temporarily flagged IP). Without this, that block page would be silently
+    rendered into a PDF — so we detect it and fail loudly instead.
+    """
+
+
+# Phrases that appear only on SEC's rate-limit interstitial, not in real
+# filings. Matched against the loaded page's HTML to detect a block.
+_SEC_BLOCK_MARKERS = (
+    "Undeclared Automated Tool",
+    "network of automated tools",
+    "declare your traffic",
+)
+
 
 
 def _ensure_playwright():
@@ -46,8 +83,14 @@ def _ensure_playwright():
 
 
 def _make_context(browser):
-    """Create a browser context with SEC-compliant headers."""
-    return browser.new_context(
+    """Create a browser context with SEC-compliant headers.
+
+    Also aborts all network requests from the browser: rendering is done from
+    locally-fetched HTML (set_content), so the browser should never reach out
+    to sec.gov — which is what keeps SEC's automated-tool limiter from ever
+    seeing browser traffic.
+    """
+    context = browser.new_context(
         user_agent=SEC_USER_AGENT,
         extra_http_headers={
             "User-Agent": SEC_USER_AGENT,
@@ -61,6 +104,19 @@ def _make_context(browser):
             "Upgrade-Insecure-Requests": "1",
         },
     )
+    # The browser renders local HTML (via set_content) and must never reach the
+    # network: any http(s) sub-resource (e.g. an absolute sec.gov image URL)
+    # would re-expose us to SEC's rate limiter. Abort every network request;
+    # inline assets (data: URIs) and unresolved relatives are unaffected.
+    context.route(
+        "**/*",
+        lambda route: (
+            route.abort()
+            if route.request.url.startswith(("http://", "https://"))
+            else route.continue_()
+        ),
+    )
+    return context
 
 
 def _pdf_filename_from_url(url: str, index: int) -> str:
@@ -80,11 +136,150 @@ def _pdf_filename_from_url(url: str, index: int) -> str:
     return f"filing_{index + 1:03d}.pdf"
 
 
+def _looks_blocked(html: str) -> bool:
+    """True if *html* is SEC's rate-limit interstitial rather than a filing."""
+    head = html[:4000]  # the block notice is at the very top of the document
+    return any(marker in head for marker in _SEC_BLOCK_MARKERS)
+
+
+def _fetch_filing_html(
+    url: str,
+    max_attempts: int = 3,
+    backoff_s: float = 4.0,
+) -> str:
+    """Download a filing's HTML with the declared SEC User-Agent.
+
+    We fetch with ``requests`` (not the browser) because SEC fingerprints and
+    rate-limits headless Chromium far more aggressively than a plain declared
+    request — the same reason ``get_filings`` fetches reliably. If SEC serves
+    its automated-tool interstitial, retry with exponential backoff, then raise
+    :class:`SECAccessBlocked`.
+    """
+    for attempt in range(max_attempts):
+        resp = requests.get(url, headers=HEADERS, timeout=60)
+        resp.raise_for_status()
+        html = resp.text
+        if not _looks_blocked(html):
+            return html
+        if attempt < max_attempts - 1:
+            time.sleep(backoff_s * (2 ** attempt))
+
+    raise SECAccessBlocked(
+        "SEC returned its 'undeclared automated tool' page instead of the "
+        f"filing (URL: {url}). Your traffic is temporarily rate-limited. What "
+        "helps: set a descriptive FINDATA_SEC_USER_AGENT (e.g. "
+        "'YourCompany you@email.com'), wait a few minutes, and avoid fetching "
+        "many filings back-to-back."
+    )
+
+
 def _render_single(page, url: str, page_format: str, wait_ms: int) -> bytes:
-    """Navigate to *url* and return the rendered PDF bytes."""
-    page.goto(url)
+    """Fetch *url*'s HTML via requests, render it locally, return PDF bytes.
+
+    The browser renders HTML loaded with ``set_content`` — it never navigates
+    to sec.gov — so SEC only ever sees the single trusted ``requests`` fetch.
+    (Trade-off: images/external assets referenced by relative URLs aren't
+    fetched, so the PDF is text-and-layout faithful but may omit some images.)
+    """
+    html = _fetch_filing_html(url)
+    page.set_content(html, wait_until="domcontentloaded")
     page.wait_for_timeout(wait_ms)
     return page.pdf(format=page_format)
+
+
+def _render_urls(urls: list[str], page_format: str, wait_ms: int) -> bytes:
+    """Launch Chromium once, render every URL, return PDF or ZIP bytes.
+
+    Drives the Playwright **sync** API in the current process — so the caller
+    must be in an event-loop-clean context. :func:`download_filing_pdf` runs
+    this inside a dedicated subprocess (via ``_pdf_worker``) precisely so that
+    contract always holds, even under Jupyter/Tornado on Windows.
+
+    Single URL → PDF bytes. Multiple URLs → ZIP bytes (one PDF per filing).
+    """
+    sync_playwright = _ensure_playwright()
+    single = len(urls) == 1
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = _make_context(browser)
+        page = context.new_page()
+
+        if single:
+            result_bytes = _render_single(page, urls[0], page_format, wait_ms)
+        else:
+            buf = io.BytesIO()
+            seen_names: dict[str, int] = {}
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i, u in enumerate(urls):
+                    pdf_bytes = _render_single(page, u, page_format, wait_ms)
+                    name = _pdf_filename_from_url(u, i)
+                    if name in seen_names:
+                        seen_names[name] += 1
+                        stem, ext = name.rsplit(".", 1)
+                        name = f"{stem}_{seen_names[name]}.{ext}"
+                    else:
+                        seen_names[name] = 0
+                    zf.writestr(name, pdf_bytes)
+            result_bytes = buf.getvalue()
+
+        browser.close()
+        return result_bytes
+
+
+def _render_urls_isolated(urls: list[str], page_format: str, wait_ms: int) -> bytes:
+    """Render in a clean child process so the browser always starts.
+
+    A headless-browser sync API needs a compatible asyncio state. Notebook
+    kernels (Jupyter/IPython) and other async hosts leave the process's
+    event-loop policy in a state where Playwright fails to launch — on Windows
+    this surfaces as ``WinError 10014`` / "no running event loop". A fresh child
+    process has none of that baggage: it sets the Proactor policy and runs the
+    render exactly like a plain script.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="findata_pdf_")
+    spec_path = os.path.join(tmpdir, "spec.json")
+    out_path = os.path.join(tmpdir, "out.bin")
+    try:
+        with open(spec_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "urls": urls,
+                    "page_format": page_format,
+                    "wait_ms": wait_ms,
+                    "out_path": out_path,
+                },
+                f,
+            )
+
+        # Ensure the worker can import findata regardless of its CWD.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = (
+            _PROJECT_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+        ).rstrip(os.pathsep)
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "findata.sec._pdf_worker", spec_path],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if proc.returncode == _WORKER_BLOCKED_CODE:
+            raise SECAccessBlocked(proc.stderr.strip() or "SEC blocked the request.")
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "PDF rendering failed in the worker subprocess:\n"
+                + (proc.stderr.strip() or "(no error output)")
+            )
+
+        with open(out_path, "rb") as f:
+            return f.read()
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def download_filing_pdf(
@@ -93,7 +288,7 @@ def download_filing_pdf(
     page_format: str = "A4",
     wait_ms: int = 1500,
 ) -> bytes:
-    """Render one or more SEC filing pages to PDF via headless Chromium.
+    """Render one or more SEC filings to PDF via headless Chromium.
 
     This is the library equivalent of the server's
     ``GET /v1/api/download-pdf`` endpoint.
@@ -104,8 +299,10 @@ def download_filing_pdf(
       ZIP bytes.  Filenames inside the ZIP are derived from each URL's
       path (e.g. ``aapl-20240928.pdf``).
 
-    The browser is launched **once** and reused across all URLs for
-    efficiency.
+    The rendering runs in an isolated subprocess so it works from **any** host —
+    including Jupyter/IPython notebooks on Windows, where Playwright's sync
+    browser otherwise fails to start due to the event-loop policy. The browser
+    is launched **once** in that subprocess and reused across all URLs.
 
     Args:
         url:          A single URL string, or a list of URL strings.
@@ -122,62 +319,15 @@ def download_filing_pdf(
         Also written to *output_path* if provided.
 
     Raises:
-        RuntimeError:  If Playwright is not installed.
-        ValueError:    If *url* is an empty list.
-        Exception:     Propagates any Playwright/browser errors.
+        RuntimeError:      If Playwright is not installed.
+        ValueError:        If *url* is an empty list.
+        SECAccessBlocked:  If SEC rate-limits the fetch.
     """
-    sync_playwright = _ensure_playwright()
-
     urls = [url] if isinstance(url, str) else list(url)
     if not urls:
         raise ValueError("At least one URL is required.")
 
-    single = len(urls) == 1
-
-    def _run_playwright_logic():
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = _make_context(browser)
-            page = context.new_page()
-
-            if single:
-                result_bytes = _render_single(page, urls[0], page_format, wait_ms)
-            else:
-                buf = io.BytesIO()
-                seen_names: dict[str, int] = {}
-                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for i, u in enumerate(urls):
-                        pdf_bytes = _render_single(page, u, page_format, wait_ms)
-                        name = _pdf_filename_from_url(u, i)
-                        if name in seen_names:
-                            seen_names[name] += 1
-                            stem, ext = name.rsplit(".", 1)
-                            name = f"{stem}_{seen_names[name]}.{ext}"
-                        else:
-                            seen_names[name] = 0
-                        zf.writestr(name, pdf_bytes)
-                result_bytes = buf.getvalue()
-
-            browser.close()
-            return result_bytes
-
-    # Jupyter Notebook 등 이미 이벤트 루프가 돌고 있는 환경에서 Playwright Sync API를 
-    # 호출하면 발생하는 에러를 방지하기 위해, 루프가 감지되면 별도 스레드에서 실행합니다.
-    import asyncio
-    import concurrent.futures
-
-    try:
-        loop = asyncio.get_running_loop()
-        is_running = True
-    except RuntimeError:
-        is_running = False
-
-    if is_running:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_run_playwright_logic)
-            result_bytes = future.result()
-    else:
-        result_bytes = _run_playwright_logic()
+    result_bytes = _render_urls_isolated(urls, page_format, wait_ms)
 
     if output_path is not None:
         out = Path(output_path)
