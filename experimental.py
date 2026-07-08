@@ -14,6 +14,18 @@ Multiple filings in a date range -> one ZIP (one PDF per filing):
     python experimental.py MSFT 10-Q 2022-01-01 2023-12-31
 
 Output is written to ./output/.
+
+files that are essential to download the filings : 
+
+experimental.py	the CLI you run
+findata/init.py	package entry (import findata)
+findata/sec/pdf.py	download_filing_pdf_for → download_filing_pdf → render/subprocess logic + SECAccessBlocked
+findata/sec/_pdf_worker.py	the subprocess that runs Chromium (doesn't show in the trace because it's a separate process)
+findata/sec/filings.py	find_filings (ticker+form+dates → rows)
+findata/sec/_cik.py	lookup_cik (ticker → CIK)
+findata/sec/utils/sec_submissions.py	fetch_and_resolve (submissions.json → document_url)
+findata/sec/const.py	HEADERS / SEC_USER_AGENT
+
 """
 
 import io
