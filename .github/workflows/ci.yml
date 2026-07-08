@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -6,8 +6,9 @@ on:
   pull_request:
 
 jobs:
-  test:
-    name: Test (build + test gate)
+  # ── CI: tests on Postgres (the alternate backend) ────────────────────
+  test-postgres:
+    name: Test (Postgres backend)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -23,32 +24,81 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
-      - name: Install package (server + dart + dev)
-        run: pip install ".[server,dart,dev]"
-
+      - name: Install package
+        run: pip install ".[all,dev]"
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/findata_test
         run: pytest -q
 
+  # ── CI: tests on SQLite (the production backend) ─────────────────────
+  test-sqlite:
+    name: Test (SQLite backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package
+        run: pip install ".[all,dev]"
+      - name: Run tests
+        env:
+          # No DATABASE_URL → engine selects the SQLite backend, exactly like prod.
+          FINDATA_DATA_DIR: ${{ runner.temp }}/findata_ci
+        run: pytest -q
+
+  # ── CI: verify the Docker image builds ───────────────────────────────
   docker:
     name: Docker image build
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test-postgres, test-sqlite]
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t findata:ci .
-      # On deploy (main only) you'd push to ECR and roll the service, e.g.:
-      #   aws ecr get-login-password | docker login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
-      #   docker tag findata:ci <ecr-repo>:$GITHUB_SHA && docker push <ecr-repo>:$GITHUB_SHA
-      #   aws apprunner start-deployment / aws ecs update-service --force-new-deployment
+
+  # ── CD: deploy to EC2 on push to main ────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: deploy-ec2
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Package + deploy
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          OPEN_DART_API: ${{ secrets.OPEN_DART_API }}
+        run: |
+          # Reconstruct the runtime .env (SQLite mode). .env is gitignored, so it
+          # isn't in the checkout — build it from secrets so a fresh box works too.
+          printf 'OPEN_DART_API=%s\nFINDATA_DATA_DIR=/data/findata\n' "$OPEN_DART_API" > .env
+
+          tar -czf deploy.tar.gz \
+            --exclude='.git' --exclude='.venv' --exclude='__pycache__' \
+            --exclude='*.pem' --exclude='deploy.tar.gz' --exclude='*.egg-info' \
+            --exclude='build' .
+
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
+            deploy.tar.gz ubuntu@"$EC2_HOST":~/deploy.tar.gz
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ubuntu@"$EC2_HOST" \
+            "set -e; mkdir -p ~/findata-api; tar -xzf ~/deploy.tar.gz -C ~/findata-api; sed -i 's/\r\$//' ~/findata-api/deploy_remote.sh; bash ~/findata-api/deploy_remote.sh"

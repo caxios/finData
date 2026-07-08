@@ -75,7 +75,9 @@ class TestAccountsDB:
         plaintext = create_api_key(uid, db_path=self.db_path)
 
         from findata.server.db.engine import connect
-        conn = connect()
+        # Inspect the same DB the key was written to (db_path is required for
+        # the SQLite backend; ignored under Postgres).
+        conn = connect(self.db_path)
         rows = conn.execute("SELECT key_prefix, key_hash FROM api_keys").fetchall()
         conn.close()
 
