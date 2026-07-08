@@ -68,10 +68,32 @@ parsed = findata.get_filing_text(
     form="8-K",
     document_url="https://www.sec.gov/Archives/edgar/data/...",
 )
+
+# ── filing URL 리졸브 (URL을 손으로 안 만들어도 됨) ──
+# 티커 + form + (선택) 날짜 범위 → document_url 이 채워진 row 리스트
+rows = findata.find_filings("AAPL", form_type="10-K", count=5)
+rows = findata.find_filings("AAPL", form_type="10-K",
+                            date_from="2021-01-01", date_to="2023-12-31")
+# → [{"form_type", "filing_date", "accession_number", "document_url"}, ...]
+
+# ── SEC 공시 PDF 다운로드 (티커 기반, URL 불필요) ──
+# (requires: pip install "findata[server]" + python -m playwright install chromium)
+# 날짜 없음 → 최신 1건(PDF bytes), 날짜 범위 → 그 안의 전부(여러 건이면 ZIP bytes)
+findata.download_filing_pdf_for("AAPL", form_type="10-K", output_path="aapl_10k.pdf")
+findata.download_filing_pdf_for("AAPL", form_type="10-K",
+                                date_from="2021-01-01", date_to="2023-12-31",
+                                output_path="aapl_10k.zip")
+
+# ── (대안) 이미 URL을 아는 경우 직접 다운로드 ──
+pdf_bytes = findata.download_filing_pdf(
+    "https://www.sec.gov/Archives/edgar/data/320193/...",
+    output_path="aapl_10k.pdf",   # 파일로 저장 (선택)
+)
 ```
 
 공개 함수는 `findata` 최상위에 노출됩니다:
-`get_insider_trades`, `get_filings`, `get_filing_text`, `get_financials`, `get_transcript`.
+`get_insider_trades`, `get_filings`, `get_filing_text`, `find_filings`,
+`get_financials`, `get_transcript`, `download_filing_pdf`, `download_filing_pdf_for`.
 
 > ⚠️ 이전 버전에 있던 OpenDART(`findata.dart`) 라이브러리 계층은 현재 코드베이스에서
 > 제거되었습니다. 지금 findata는 **SEC EDGAR 전용**입니다.
@@ -187,7 +209,7 @@ print(resp.json())
 | `/v1/api/company-data/{ticker}` | GET | 3 | 통합 데이터 (Form 4 + 10-K/Q, 오케스트레이터) |
 | `/v1/api/sec-filings/{ticker}` | GET | 2 | 다양한 Form 유형 메타데이터 (라이브 submissions.json) |
 | `/v1/api/filing-text/{accession}` | GET | 3 | 8-K/S-4/SC13D/144 파싱 텍스트 |
-| `/v1/api/download-pdf` | GET | 5 | SEC 페이지 PDF 변환 (기본 비활성, `ENABLE_PDF_DOWNLOAD=1` 필요) |
+| `/v1/api/download-pdf` | GET | 5 | filing PDF 다운로드 (티커 또는 URL 기반, 기본 비활성, `ENABLE_PDF_DOWNLOAD=1` 필요) |
 | `/v1/api/transcript` | GET | 10 | 어닝스콜 트랜스크립트 (Tavily 업스트림) |
 | `/v1/api/transcripts/{ticker}/list` | GET | 1 | 저장된 어닝스콜 목록 |
 
@@ -466,22 +488,51 @@ text = get(
 )
 ```
 
-##### `GET /v1/api/download-pdf` — SEC 페이지 PDF 변환
+##### `GET /v1/api/download-pdf` — filing PDF 다운로드
 
-서버에 `ENABLE_PDF_DOWNLOAD=1` 환경변수가 설정되어 있어야 합니다 (Playwright + Chromium 필요).  
-응답은 JSON이 아닌 `application/pdf` 바이트입니다.
+서버에 `ENABLE_PDF_DOWNLOAD=1` 환경변수가 설정되어 있어야 합니다 (Playwright + Chromium 필요).
+
+filing을 지정하는 방법은 두 가지이며, **URL을 손으로 만들 필요가 없습니다**:
+
+- **티커 기반 (권장)**: `ticker`(+ 선택 `forms`, `date_from`, `date_to`)로 지정.
+  날짜 범위가 없으면 최신 1건, 있으면 범위 내 전부. 1건이면 `application/pdf`,
+  여러 건이면 `application/zip`(파일당 PDF 1개) 바이트를 반환합니다.
+- **URL 기반 (대안)**: 이미 URL을 아는 경우 `url` 직접 전달.
+
+`ticker` 또는 `url` 중 하나는 반드시 있어야 합니다 (없으면 400).
 
 | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
 |---------|------|:----:|--------|------|
-| `url` | `string` | ✔ | — | PDF로 변환할 SEC 페이지 URL |
+| `ticker` | `string` | △ | — | 티커로 filing 리졸브 (권장). `url` 없으면 필수 |
+| `forms` | `string` | ✗ | `"10-K"` | 티커 기반 시 resolve할 form 유형 (쉼표 구분) |
+| `date_from` | `string` | ✗ | — | 시작일 (YYYY-MM-DD). 지정 시 범위 내 전부 |
+| `date_to` | `string` | ✗ | — | 종료일 (YYYY-MM-DD) |
+| `include_archive` | `bool` | ✗ | (날짜 범위 시 자동 on) | 오래된 archive 샤드까지 탐색 |
+| `url` | `string` | △ | — | 직접 지정하는 SEC 대표 문서 URL (`ticker` 없으면 필수) |
 
 ```python
+# 티커 기반 — 최신 10-K 1건 (application/pdf)
+r = requests.get(f"{BASE}/v1/api/download-pdf",
+                 params={"ticker": "AAPL", "forms": "10-K"},
+                 headers=HEADERS)
+r.raise_for_status()
+with open("aapl_10k.pdf", "wb") as f:
+    f.write(r.content)
+
+# 티커 + 날짜 범위 — 여러 건이면 application/zip 반환
+r = requests.get(f"{BASE}/v1/api/download-pdf",
+                 params={"ticker": "AAPL", "forms": "10-K",
+                         "date_from": "2021-01-01", "date_to": "2023-12-31"},
+                 headers=HEADERS)
+r.raise_for_status()
+ext = "zip" if r.headers["content-type"] == "application/zip" else "pdf"
+with open(f"aapl_10k.{ext}", "wb") as f:
+    f.write(r.content)
+
+# URL 기반 (대안)
 r = requests.get(f"{BASE}/v1/api/download-pdf",
                  params={"url": "https://www.sec.gov/Archives/edgar/data/..."},
                  headers=HEADERS)
-r.raise_for_status()
-with open("filing.pdf", "wb") as f:
-    f.write(r.content)
 ```
 
 ---

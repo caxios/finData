@@ -79,6 +79,67 @@ def get_filings(
     return results
 
 
+def find_filings(
+    ticker: str,
+    form_type: str = "10-K,10-Q",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    count: int = 40,
+    include_archive: bool | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve a ticker + form + date window to filing rows — no parsing.
+
+    This exists so callers never have to build a SEC document URL by hand.
+    Each returned row already carries a ready-to-use ``document_url`` (the
+    primary-document URL, resolved from EDGAR's submissions JSON), alongside
+    ``form_type``, ``filing_date``, and ``accession_number``.
+
+    Selection:
+        - No date window          → the most recent ``count`` filings.
+        - ``date_from``/``date_to`` → every filing whose *filing date* falls
+          within the inclusive window (``count`` is ignored).
+
+    Args:
+        ticker:          Stock symbol (e.g. ``"AAPL"``).
+        form_type:       Comma-separated form types (default ``"10-K,10-Q"``).
+        date_from:       Inclusive lower bound, ``"YYYY-MM-DD"`` (optional).
+        date_to:         Inclusive upper bound, ``"YYYY-MM-DD"`` (optional).
+        count:           Max rows when no date window is given (default 40).
+        include_archive: Walk older archive shards. Defaults to ``True`` when a
+                         date window is given (older filings live in archive
+                         shards, not the "recent" block), else ``False``.
+
+    Returns:
+        List of filing rows sorted by filing_date descending.
+
+    Raises:
+        ValueError: If the ticker cannot be resolved to a CIK.
+    """
+    cik, _ = lookup_cik(ticker)
+    if not cik:
+        raise ValueError(f"Unknown ticker: {ticker}")
+
+    forms = {f.strip() for f in form_type.split(",") if f.strip()}
+
+    windowed = bool(date_from or date_to)
+    if include_archive is None:
+        include_archive = windowed
+    # When windowing, pull a wide slice so the window isn't truncated by
+    # `count` before we filter — the date filter decides the result size.
+    fetch_count = 10_000 if windowed else count
+
+    rows = fetch_and_resolve(
+        cik, count=fetch_count, include_archive=include_archive, forms=forms,
+    )
+
+    if date_from:
+        rows = [r for r in rows if r["filing_date"] >= date_from]
+    if date_to:
+        rows = [r for r in rows if r["filing_date"] <= date_to]
+
+    return rows
+
+
 def get_filing_text(
     ticker: str,
     form: str,

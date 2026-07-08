@@ -415,7 +415,42 @@ def get_filing_text(
 
 
 @router.get("/api/download-pdf")
-def generate_pdf(url: str):
+def generate_pdf(
+    url: str | None = Query(
+        None,
+        description="Direct primary-document URL. Optional — prefer `ticker` so "
+                    "you don't have to build a SEC URL by hand.",
+    ),
+    ticker: str | None = Query(
+        None,
+        description="Resolve filings by ticker instead of a raw URL.",
+    ),
+    forms: str = Query(
+        "10-K",
+        description="Form type(s) to resolve when `ticker` is given (comma-separated).",
+    ),
+    date_from: str | None = Query(
+        None, description="Inclusive lower bound (YYYY-MM-DD) when resolving by ticker."
+    ),
+    date_to: str | None = Query(
+        None, description="Inclusive upper bound (YYYY-MM-DD) when resolving by ticker."
+    ),
+    include_archive: bool | None = Query(
+        None,
+        description="Walk archive shards for older filings. Defaults to on when a "
+                    "date window is given.",
+    ),
+):
+    """Render SEC filing(s) to PDF.
+
+    Two ways to target the filing(s) — you never need to build the URL yourself:
+
+    - **By ticker (recommended):** pass `ticker` (+ optional `forms`, `date_from`,
+      `date_to`). With no date window you get the single latest filing; with a
+      window you get every filing in it. A single match returns a PDF; multiple
+      matches return a ZIP (one PDF per filing).
+    - **By URL (fallback):** pass a raw primary-document `url`.
+    """
     # Disabled by default: Playwright/Chromium is heavy and not installed in the
     # slim image. Enable with ENABLE_PDF_DOWNLOAD=1 on a host with the browser.
     if os.getenv("ENABLE_PDF_DOWNLOAD", "0") != "1":
@@ -431,32 +466,58 @@ def generate_pdf(url: str):
                 }
             },
         )
-    from playwright.sync_api import sync_playwright  # lazy: only when enabled
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        # [핵심 해결책] SEC가 요구하는 규격의 명찰(User-Agent)을 달고 새 창을 엽니다.
-        # [수정 포인트 1] 괄호와 기호를 모두 뺀 가장 안전하고 단순한 포맷
-        sec_user_agent = "DK mrsimple@gmail.com"
-        
-        context = browser.new_context(
-            user_agent=sec_user_agent,
-            extra_http_headers={
-                "User-Agent": sec_user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1"
-            }
+
+    if not ticker and not url:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "MISSING_TARGET",
+                    "message": "Provide either `ticker` (recommended) or `url`.",
+                }
+            },
         )
-        # browser가 아닌 context에서 페이지를 생성해야 명찰이 적용됩니다.
-        page = context.new_page()
-        # 1. SEC 페이지 접속
-        page.goto(url)
-        # [수정 포인트 3] SEC 방화벽이 페이지를 렌더링하고 차단을 풀 시간을 주기 위한 1.5초 대기
-        page.wait_for_timeout(1500)
-        # 2. 물리적 저장이 아닌, 메모리 상의 바이트(Bytes)로 PDF 구워내기
-        pdf_bytes = page.pdf(format="A4") 
-        browser.close()
-        # 3. DB에 저장하지 않고 생성된 바이트를 유저에게 그대로 전송!
-        return Response(content=pdf_bytes, media_type="application/pdf")
+
+    # Resolve the target URL(s). By ticker, use the shared library resolver so
+    # URL construction matches the rest of the system (submissions.json →
+    # primary document). By raw URL, use it directly.
+    if ticker:
+        from findata.sec.filings import find_filings
+
+        try:
+            rows = find_filings(
+                ticker,
+                form_type=forms,
+                date_from=date_from,
+                date_to=date_to,
+                count=1,  # no window → latest 1; windowed → all in range
+                include_archive=include_archive,
+            )
+        except ValueError as e:  # unknown ticker
+            raise HTTPException(status_code=404, detail=str(e))
+        urls = [r["document_url"] for r in rows if r.get("document_url")]
+        if not urls:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No {forms} filing found for {ticker!r} "
+                       f"(date_from={date_from}, date_to={date_to}).",
+            )
+    else:
+        urls = [url]
+
+    # Render via the library layer (single URL → PDF bytes, multiple → ZIP bytes).
+    from findata.sec.pdf import download_filing_pdf
+
+    try:
+        data = download_filing_pdf(urls)
+    except RuntimeError as e:  # Playwright not installed
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if len(urls) > 1:
+        filename = f"{(ticker or 'filings').upper()}_filings.zip"
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    return Response(content=data, media_type="application/pdf")

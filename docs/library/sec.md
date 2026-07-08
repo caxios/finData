@@ -7,16 +7,17 @@
 
 ## 퍼블릭 API
 
-`findata.__init__.py`에서 아래 5개 함수를 최상위로 re-export합니다:
+`findata.__init__.py`에서 아래 6개 함수를 최상위로 re-export합니다:
 
 ```python
 import findata
 
-findata.get_insider_trades(ticker)    # → Form 4 내부자 거래
-findata.get_filings(ticker, ...)      # → 10-K/10-Q 공시 + 파싱
-findata.get_filing_text(ticker, ...)  # → 8-K/S-4/SC13D/144 텍스트
-findata.get_financials(ticker)        # → XBRL 재무 팩트
-findata.get_transcript(ticker, ...)   # → 어닝스콜 트랜스크립트
+findata.get_insider_trades(ticker)       # → Form 4 내부자 거래
+findata.get_filings(ticker, ...)         # → 10-K/10-Q 공시 + 파싱
+findata.get_filing_text(ticker, ...)     # → 8-K/S-4/SC13D/144 텍스트
+findata.get_financials(ticker)           # → XBRL 재무 팩트
+findata.get_transcript(ticker, ...)      # → 어닝스콜 트랜스크립트
+findata.download_filing_pdf(url, ...)    # → SEC 공시 PDF 다운로드
 ```
 
 ---
@@ -347,6 +348,80 @@ for q in range(1, 5):
     result = findata.get_transcript("MSFT", year=2024, quarter=q)
     status = f"{len(result['transcript_text']):,}자" if result else "없음"
     print(f"MSFT 2024 Q{q}: {status}")
+```
+
+---
+
+### `pdf.py` — SEC 공시 PDF 다운로드
+
+#### `download_filing_pdf(url, output_path, page_format, wait_ms)`
+
+SEC 공시 페이지를 Playwright(headless Chromium)로 렌더링하여 PDF로 변환합니다.
+서버 API의 `GET /v1/api/download-pdf` 엔드포인트와 동일한 기능을 라이브러리
+계층에서 제공합니다.
+
+> ⚠️ 이 함수는 Playwright가 필요합니다:
+> ```bash
+> pip install "findata[server]"
+> python -m playwright install chromium
+> ```
+
+**파라미터:**
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|:----:|--------|------|
+| `url` | `str \| list[str]` | ✔ | — | PDF로 렌더링할 SEC 공시 페이지의 전체 URL. 리스트 형태로 여러 URL을 전달하면 ZIP 파일로 묶어서 반환합니다. |
+| `output_path` | `str \| Path \| None` | ✗ | `None` | 지정 시 해당 경로에 결과(PDF 또는 ZIP) 저장. 상위 디렉토리는 자동 생성 |
+| `page_format` | `str` | ✗ | `"A4"` | PDF 페이지 포맷. `"Letter"`, `"Legal"` 등도 가능 |
+| `wait_ms` | `int` | ✗ | `1500` | 페이지 로드 후 PDF 생성까지 대기 시간(ms). SEC 방화벽 체크 통과용 |
+
+**반환값:** `bytes` — 단일 URL일 경우 PDF 바이트, 여러 URL일 경우 ZIP 바이트. `output_path` 지정 시 파일에도 동시에 저장됩니다.
+
+**예외:**
+- `RuntimeError` — Playwright가 설치되어 있지 않은 경우
+- 기타 Playwright/브라우저 관련 오류는 그대로 전파됩니다
+
+**예시 (로컬 Jupyter Notebook 환경 포함):**
+
+PyPI에 배포되지 않은 로컬 패키지를 Jupyter Notebook(`.ipynb`)에서 사용하려면, `sys.path`에 프로젝트 루트를 추가해야 합니다.
+
+```python
+import sys
+import os
+
+# 1. 로컬 프로젝트 루트 경로를 sys.path에 추가 (ipynb 파일 위치에 따라 상대 경로 조정)
+# 예: ipynb 파일이 프로젝트 루트에 있다면 os.path.abspath('.') 사용
+sys.path.append(os.path.abspath('c:/finData'))
+
+import findata
+
+# ── 단일 URL: PDF 바이트만 가져오기 ──
+pdf_bytes = findata.download_filing_pdf(
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm"
+)
+print(f"PDF 크기: {len(pdf_bytes):,} bytes")
+
+# ── 여러 URL: 한 번에 ZIP 파일로 다운로드 ──
+# 여러 URL을 리스트로 넘기면 브라우저를 한 번만 띄워 처리하므로 속도가 빠릅니다.
+urls = [
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm",
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019324000069/aapl-20240629.htm"
+]
+zip_bytes = findata.download_filing_pdf(
+    urls,
+    output_path="output/aapl_recent_filings.zip",
+)
+print(f"ZIP 저장 완료. 크기: {len(zip_bytes):,} bytes")
+
+# ── get_filings와 조합하여 여러 공시 한 번에 받기 ──
+filings = findata.get_filings("AAPL", form_type="10-Q", count=3, parse_sections=False)
+target_urls = [f["document_url"] for f in filings if f.get("document_url")]
+
+if target_urls:
+    findata.download_filing_pdf(
+        target_urls,
+        output_path="aapl_10q_bundle.zip",
+    )
 ```
 
 ---
