@@ -307,7 +307,7 @@ def list_sec_filings(
     populating a filings list UI; pair with form-specific parsing endpoints
     when section text is needed.
     """
-    from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
+    from findata.sec.utils.sec_submissions import fetch_and_resolve
 
     cik, _ = _lookup_cik(ticker)
     if not cik:

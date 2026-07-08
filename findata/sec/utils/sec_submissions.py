@@ -1,5 +1,5 @@
 """
-sec_10kq_rss.py
+sec_submissions.py
 Stage 1 of the 10-K / 10-Q pipeline.
 
 Fetches filing metadata from EDGAR's submissions JSON endpoint

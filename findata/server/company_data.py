@@ -27,7 +27,7 @@ from findata.sec.utils.form4.form4_parser import parse_form4
 from findata.sec.utils.form4.sec_form4_watchlist import fetch_filings as fetch_form4_filings
 from findata.server.db.sec_10kq_db import save_batch as save_10kq_batch
 from findata.sec.utils.sec_10kq.sec_10kq_parser import parse_single_filing
-from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
+from findata.sec.utils.sec_submissions import fetch_and_resolve
 
 
 # ── Freshness policy ────────────────────────────────────────────────────

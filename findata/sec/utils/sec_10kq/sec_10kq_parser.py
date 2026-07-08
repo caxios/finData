@@ -371,7 +371,7 @@ def extract_filing_sections(html: str, form_type: str) -> dict:
 
 def parse_single_filing(filing_meta: dict) -> dict:
     """
-    Given a filing metadata dict (from findata.sec.utils.sec_10kq_rss),
+    Given a filing metadata dict (from findata.sec.utils.sec_submissions),
     download, parse, and return the structured result.
 
     Args:

@@ -15,7 +15,7 @@ import logging
 
 from findata.server.db.config import SEC_10KQ_DB
 from findata.server.db.sec_10kq_db import save_batch, get_filing_count
-from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
+from findata.sec.utils.sec_submissions import fetch_and_resolve
 from findata.sec.utils.sec_10kq.sec_10kq_parser import parse_single_filing
 
 logger = logging.getLogger(__name__)

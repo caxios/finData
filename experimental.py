@@ -2,36 +2,53 @@
 Standalone SEC 10-K/10-Q PDF downloader.
 
 Run from a terminal (NOT inside Jupyter) so you always use the current code and
-a clean event loop:
+a clean event loop.
 
-    python experimental.py                # latest AAPL 10-K
-    python experimental.py TSLA           # latest TSLA 10-K
-    python experimental.py MSFT 10-Q      # latest MSFT 10-Q
+Single filing (latest) -> one PDF:
+    python experimental.py                       # latest AAPL 10-K
+    python experimental.py TSLA                  # latest TSLA 10-K
+    python experimental.py MSFT 10-Q             # latest MSFT 10-Q
 
-Output PDFs (or ZIPs) are written to ./output/.
+Multiple filings in a date range -> one ZIP (one PDF per filing):
+    python experimental.py AAPL 10-K 2019-01-01 2024-12-31
+    python experimental.py MSFT 10-Q 2022-01-01 2023-12-31
+
+Output is written to ./output/.
 """
 
+import io
 import sys
+import zipfile
 from pathlib import Path
 
 import findata
 from findata.sec.pdf import SECAccessBlocked
 
+ZIP_MAGIC = b"PK\x03\x04"
+
 
 def main() -> int:
     ticker = sys.argv[1].upper() if len(sys.argv) > 1 else "AAPL"
     form = sys.argv[2].upper() if len(sys.argv) > 2 else "10-K"
+    date_from = sys.argv[3] if len(sys.argv) > 3 else None
+    date_to = sys.argv[4] if len(sys.argv) > 4 else None
 
     out_dir = Path(__file__).parent / "output"
     out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / f"{ticker}_{form.replace('-', '')}.pdf"
 
-    print(f"Downloading latest {form} for {ticker} ...")
+    if date_from or date_to:
+        print(f"Downloading all {form} for {ticker} in [{date_from} .. {date_to}] ...")
+    else:
+        print(f"Downloading latest {form} for {ticker} ...")
+
     try:
+        # No output_path here: we inspect the bytes first to pick .pdf vs .zip,
+        # then write with the correct extension.
         data = findata.download_filing_pdf_for(
             ticker,
             form_type=form,
-            output_path=str(out_path),
+            date_from=date_from,
+            date_to=date_to,
         )
     except SECAccessBlocked as e:
         print("\n[SEC RATE-LIMITED] SEC blocked the request:")
@@ -42,20 +59,29 @@ def main() -> int:
         print(f"\n[BAD INPUT] {e}")
         return 1
 
-    # Sanity check: make sure we saved a real PDF, not something unexpected.
+    is_zip = data[:4] == ZIP_MAGIC
     is_pdf = data[:5] == b"%PDF-"
-    head = data[:2000].decode("latin-1", "ignore")
-    is_block = "Undeclared Automated Tool" in head
+
+    suffix = f"_{date_from}_{date_to}" if (date_from or date_to) else ""
+    ext = "zip" if is_zip else "pdf"
+    out_path = out_dir / f"{ticker}_{form.replace('-', '')}{suffix}.{ext}"
+    out_path.write_bytes(data)
 
     print(f"\nSaved: {out_path}")
-    print(f"  size        : {len(data):,} bytes")
-    print(f"  valid PDF   : {is_pdf}")
-    print(f"  block page? : {is_block}")
-
-    if is_pdf and not is_block:
+    print(f"  size : {len(data):,} bytes")
+    if is_zip:
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        print(f"  type : ZIP with {len(names)} filing(s)")
+        for n in names:
+            print(f"           - {n}")
+        print("\nSUCCESS - unzip the file above.")
+        return 0
+    if is_pdf:
+        print("  type : single PDF")
         print("\nSUCCESS - open the file above.")
         return 0
-    print("\nSomething is off - the file is not a clean PDF. Tell Claude this output.")
+
+    print("\nSomething is off - not a clean PDF/ZIP. Tell Claude this output.")
     return 1
 
 

@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from findata.sec._cik import lookup_cik
-from findata.sec.utils.sec_10kq.sec_10kq_rss import fetch_and_resolve
+from findata.sec.utils.sec_submissions import fetch_and_resolve
 from findata.sec.utils.sec_10kq.sec_10kq_parser import parse_single_filing
 
 
