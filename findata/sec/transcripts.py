@@ -14,8 +14,11 @@ Usage::
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import zipfile
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -90,16 +93,15 @@ def get_transcript(
 
     ticker = ticker.upper()
 
-    api_key = os.environ.get("TAVILY_API_KEY")
-    if not api_key:
-        raise RuntimeError("TAVILY_API_KEY environment variable is not set")
-
     try:
         from dotenv import load_dotenv
         load_dotenv()
-        api_key = os.environ.get("TAVILY_API_KEY", api_key)
     except ImportError:
         pass
+
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        raise RuntimeError("TAVILY_API_KEY environment variable is not set")
 
     from tavily import TavilyClient
     client = TavilyClient(api_key=api_key)
@@ -150,3 +152,102 @@ def get_transcript(
         }
 
     return None
+
+
+def _expand_quarters(
+    year_from: int,
+    quarter_from: int,
+    year_to: int,
+    quarter_to: int,
+) -> list[tuple[int, int]]:
+    """Enumerate every (year, quarter) from the start to the end quarter.
+
+    Quarters are treated as a single running index (``year*4 + (quarter-1)``)
+    so the range spans year boundaries. The bounds are inclusive, and swapped
+    if given in reverse order.
+    """
+    start = year_from * 4 + (quarter_from - 1)
+    end = year_to * 4 + (quarter_to - 1)
+    if end < start:
+        start, end = end, start
+    return [(idx // 4, idx % 4 + 1) for idx in range(start, end + 1)]
+
+
+def download_transcripts_for(
+    ticker: str,
+    year_from: int,
+    quarter_from: int,
+    year_to: int | None = None,
+    quarter_to: int | None = None,
+    output_path: str | Path | None = None,
+) -> bytes:
+    """Download earnings call transcript(s) as text by ticker + quarter range.
+
+    The transcript analog of :func:`findata.download_filing_pdf_for`: instead of
+    one filing you give a range of fiscal quarters, and each is resolved via
+    :func:`get_transcript` (Tavily search + extract) and written out as plain
+    text. Stateless — nothing is cached; each quarter spends Tavily credits.
+
+    Selection:
+        - Single quarter (no ``*_to``) → the transcript text as UTF-8 bytes.
+        - Multiple quarters            → a ZIP archive (one ``.txt`` per call).
+
+    Quarters with no findable transcript are skipped with a warning; the result
+    contains only the ones that were found. Raises if none were found at all.
+
+    Args:
+        ticker:        Stock symbol (e.g. ``"AAPL"``).
+        year_from:     Fiscal year of the first quarter (e.g. ``2020``).
+        quarter_from:  Fiscal quarter of the first quarter (``1``-``4``).
+        year_to:       Fiscal year of the last quarter. Defaults to ``year_from``.
+        quarter_to:    Fiscal quarter of the last quarter. Defaults to
+                       ``quarter_from`` (i.e. a single quarter).
+        output_path:   If given, also write the result (txt or zip) to this path.
+
+    Returns:
+        UTF-8 text bytes (single quarter) or ZIP bytes (multiple quarters).
+
+    Raises:
+        ValueError:   If a quarter is outside 1-4, or no transcript was found.
+        RuntimeError: If TAVILY_API_KEY is not set.
+    """
+    ticker = ticker.upper()
+    if year_to is None:
+        year_to = year_from
+    if quarter_to is None:
+        quarter_to = quarter_from
+
+    quarters = _expand_quarters(year_from, quarter_from, year_to, quarter_to)
+
+    found: list[tuple[str, str]] = []  # (filename, transcript_text)
+    for year, quarter in quarters:
+        transcript = get_transcript(ticker, year=year, quarter=quarter)
+        if not transcript:
+            print(f"  [not found] {ticker} Q{quarter} {year} — skipping")
+            continue
+        name = f"{ticker}_{year}_Q{quarter}.txt"
+        text = transcript["transcript_text"]
+        found.append((name, text))
+        print(f"  [ok] {name} ({len(text):,} chars) <- {transcript['source_domain']}")
+
+    if not found:
+        raise ValueError(
+            f"No transcripts found for {ticker} in the requested quarter range "
+            f"({year_from} Q{quarter_from} .. {year_to} Q{quarter_to})."
+        )
+
+    if len(found) == 1:
+        result_bytes = found[0][1].encode("utf-8")
+    else:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, text in found:
+                zf.writestr(name, text)
+        result_bytes = buf.getvalue()
+
+    if output_path is not None:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(result_bytes)
+
+    return result_bytes

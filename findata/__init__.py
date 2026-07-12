@@ -25,6 +25,10 @@ Usage::
     # Earnings call transcript (requires: pip install findata[transcripts])
     transcript = findata.get_transcript("AAPL", year=2024, quarter=4)
 
+    # Download transcript(s) as text by ticker + quarter range — single quarter
+    # returns .txt bytes; multiple quarters return a .zip
+    findata.download_transcripts_for("AAPL", 2020, 1, 2024, 4, output_path="aapl.zip")
+
     # Download a filing as PDF by ticker (requires: pip install findata[server])
     findata.download_filing_pdf_for("AAPL", form_type="10-K", output_path="aapl.pdf")
 
@@ -37,7 +41,7 @@ For the commercial API server, see ``findata.server``.
 from findata.sec.form4 import get_insider_trades
 from findata.sec.filings import get_filings, get_filing_text, find_filings
 from findata.sec.financials import get_financials
-from findata.sec.transcripts import get_transcript
+from findata.sec.transcripts import get_transcript, download_transcripts_for
 from findata.sec.pdf import download_filing_pdf, download_filing_pdf_for
 
 __all__ = [
@@ -47,6 +51,7 @@ __all__ = [
     "find_filings",
     "get_financials",
     "get_transcript",
+    "download_transcripts_for",
     "download_filing_pdf",
     "download_filing_pdf_for",
 ]
