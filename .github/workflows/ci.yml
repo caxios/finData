@@ -3,6 +3,17 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    # Only run CI/CD when server-relevant files change.
+    # Package-only edits (findata/sec/, download.py, notebooks, docs, etc.)
+    # won't trigger the pipeline or cost EC2 dollars.
+    paths:
+      - 'findata/server/**'
+      - 'findata/__init__.py'
+      - 'Dockerfile'
+      - 'deploy_remote.sh'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
+      - 'tests/**'
   pull_request:
 
 jobs:
