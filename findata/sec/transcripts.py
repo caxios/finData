@@ -23,19 +23,27 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-TRANSCRIPT_DOMAINS = [
+# The transcript source to try first. Only if investing.com yields no usable
+# transcript do we search the fallback sources below.
+PRIMARY_DOMAIN = "investing.com"
+
+# Searched (as a second Tavily pass) only when the primary domain comes up empty.
+FALLBACK_DOMAINS = [
     "fool.com",
     "rev.com",
     "seekingalpha.com",
     "insidermonkey.com",
-    "investing.com",
 ]
 
+# Full set of domains we may ever search (primary first). Kept for callers/tests
+# that reference the overall source list.
+TRANSCRIPT_DOMAINS = [PRIMARY_DOMAIN, *FALLBACK_DOMAINS]
+
+# Relative preference used to rank results *within* the fallback pass.
 DOMAIN_PRIORITY = {
     "fool.com": 100,
     "rev.com": 80,
     "insidermonkey.com": 60,
-    "investing.com": 50,
     "seekingalpha.com": 40,
 }
 
@@ -61,6 +69,67 @@ def _score_result(result: dict, ticker: str, fiscal_year: int, fiscal_quarter: i
     if "transcript" in title:
         score += 10
     return score
+
+
+def _search_and_extract(
+    client,
+    query: str,
+    domains: list[str],
+    ticker: str,
+    year: int,
+    quarter: int,
+) -> dict[str, Any] | None:
+    """Run one Tavily search restricted to *domains*, then extract the best
+    usable transcript from the ranked results.
+
+    Returns a transcript dict, or ``None`` if the search returned nothing or no
+    candidate produced a long-enough transcript.
+    """
+    search_resp = client.search(
+        query=query,
+        include_domains=domains,
+        max_results=8,
+        search_depth="advanced",
+    )
+    results = search_resp.get("results") or []
+    if not results:
+        return None
+
+    ranked = sorted(
+        results,
+        key=lambda r: _score_result(r, ticker, year, quarter),
+        reverse=True,
+    )
+
+    for candidate in ranked:
+        url = candidate.get("url")
+        if not url:
+            continue
+        try:
+            extract_resp = client.extract(urls=[url], extract_depth="advanced")
+        except Exception as e:
+            print(f"  [extract failed] {url}: {e}")
+            continue
+
+        items = extract_resp.get("results") or []
+        if not items:
+            continue
+        text = (items[0].get("raw_content") or "").strip()
+        if len(text) < MIN_TRANSCRIPT_CHARS:
+            print(f"  [too short, skipping] {url} ({len(text)} chars)")
+            continue
+
+        return {
+            "ticker": ticker,
+            "fiscal_year": year,
+            "fiscal_quarter": quarter,
+            "source_url": url,
+            "source_domain": _domain_of(url),
+            "title": candidate.get("title"),
+            "transcript_text": text,
+        }
+
+    return None
 
 
 def get_transcript(
@@ -107,51 +176,20 @@ def get_transcript(
     client = TavilyClient(api_key=api_key)
 
     query = f"{ticker} Q{quarter} {year} earnings call transcript"
-    search_resp = client.search(
-        query=query,
-        include_domains=TRANSCRIPT_DOMAINS,
-        max_results=8,
-        search_depth="advanced",
+
+    # Phase 1 — try investing.com first.
+    transcript = _search_and_extract(
+        client, query, [PRIMARY_DOMAIN], ticker, year, quarter
     )
-    results = search_resp.get("results") or []
-    if not results:
-        return None
+    if transcript is not None:
+        return transcript
 
-    ranked = sorted(
-        results,
-        key=lambda r: _score_result(r, ticker, year, quarter),
-        reverse=True,
+    # Phase 2 — investing.com had nothing usable; fall back to the other sources.
+    print(f"  [{PRIMARY_DOMAIN} miss] falling back to "
+          f"{', '.join(FALLBACK_DOMAINS)}")
+    return _search_and_extract(
+        client, query, FALLBACK_DOMAINS, ticker, year, quarter
     )
-
-    for candidate in ranked:
-        url = candidate.get("url")
-        if not url:
-            continue
-        try:
-            extract_resp = client.extract(urls=[url], extract_depth="advanced")
-        except Exception as e:
-            print(f"  [extract failed] {url}: {e}")
-            continue
-
-        items = extract_resp.get("results") or []
-        if not items:
-            continue
-        text = (items[0].get("raw_content") or "").strip()
-        if len(text) < MIN_TRANSCRIPT_CHARS:
-            print(f"  [too short, skipping] {url} ({len(text)} chars)")
-            continue
-
-        return {
-            "ticker": ticker,
-            "fiscal_year": year,
-            "fiscal_quarter": quarter,
-            "source_url": url,
-            "source_domain": _domain_of(url),
-            "title": candidate.get("title"),
-            "transcript_text": text,
-        }
-
-    return None
 
 
 def _expand_quarters(
